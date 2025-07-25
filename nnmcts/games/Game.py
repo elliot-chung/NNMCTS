@@ -63,7 +63,7 @@ class Game(ABC):
   def current_turn(self):
     pass
 
-  # Returns a a flat array representing the current state of the game
+  # Returns a flat list representing the current state of the game
   @abstractmethod
   def get_state(self):
     pass
@@ -76,6 +76,11 @@ class Game(ABC):
   # Returns a list of valid moves
   @abstractmethod
   def valid_moves(self):
+    pass
+  
+  # Returns a list the same shape as the state, where each valid position has a 1 and all other positions have a 0
+  @abstractmethod
+  def get_mask(self):
     pass
 
   # Returns true if the game is terminal, false otherwise

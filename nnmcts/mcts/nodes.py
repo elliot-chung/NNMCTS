@@ -1,5 +1,6 @@
 import random
 import weakref
+import numpy as np
 from math import sqrt, log
 from time import time
 
@@ -171,7 +172,14 @@ class NeuralNode(Node):
       policy, value = NeuralNode.model(tensor)
       policy = policy.detach().numpy()[0]
       value = value.detach().numpy()[0][0]
-
+      
+    mask = np.array(self.environment.get_mask())
+    policy = policy * mask
+    policy_sum = policy.sum()
+    if policy_sum == 0:
+      policy = mask / mask.sum()
+    else:
+      policy = policy / policy_sum
 
     self.neural_policy = policy
 

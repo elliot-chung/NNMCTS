@@ -128,13 +128,17 @@ class UTTTGame(Game):
     moves = self.valid_moves()
     move = random.choice(moves)
     self.make_move(move)
-
-  def get_canonical_state(self) -> list[Position]:
-    norm_state = [s * self.turn for s in self.state]
-    pos_mask = [0] * len(norm_state)
+    
+  def get_mask(self) -> list[int]:
+    pos_mask = [0] * len(self.state)
     for mov in self.valid_moves():
       ind = self.translate(mov)
       pos_mask[ind] = 1
+    return pos_mask
+
+  def get_canonical_state(self) -> list[Position]:
+    norm_state = [s * self.turn for s in self.state]
+    pos_mask = self.get_mask()
     return norm_state, pos_mask
 
   def state_to_string(state):

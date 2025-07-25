@@ -29,9 +29,8 @@ class Arena:
       action = action1 if action1 != None else action2
       policy = policy1 if policy1 != None else policy2
 
-      player = "player_one" if action1 != None else "player_two"
-
       if record:
+        player = "player_one" if action1 != None else "player_two"
         self.record[player]["states"].append(self.environment.get_canonical_state())
         self.record[player]["policies"].append(policy)
 
