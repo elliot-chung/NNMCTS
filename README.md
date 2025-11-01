@@ -66,4 +66,5 @@ Weak references to manage large trees and prevent leaks during long runs.
 
 ## WIP
 - Parallel data pipeline (possiblly a distributed pipeline?)
-- Scale up the model/training time
+- Migrate jupyter notebook cells to standalone python scripts
+  - Scale up the model/training time by running scripts on a cloud provider
