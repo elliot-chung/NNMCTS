@@ -63,3 +63,7 @@ Weak references to manage large trees and prevent leaks during long runs.
 - `TTTNet` / `UTTTNet`: models
 - `Arena`: game orchestration
 - `Player`: random/MCTS/human/neural agents
+
+## WIP
+- Parallel data pipeline (possiblly a distributed pipeline?)
+- Scale up the model/training time
