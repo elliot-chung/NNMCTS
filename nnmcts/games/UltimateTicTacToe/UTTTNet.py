@@ -20,7 +20,6 @@ class UTTTNet(torch.nn.Module):
     self.value2 = torch.nn.Linear(in_features=256, out_features=128)
     self.value3 = torch.nn.Linear(in_features=128, out_features=1)
 
-    self.softmax = torch.nn.Softmax(dim=1)
     self.tanh = torch.nn.Tanh()
     self.relu = torch.nn.ReLU()
 
@@ -52,9 +51,6 @@ class UTTTNet(torch.nn.Module):
     p = self.policy2(p)
     p = self.relu(p)
     p = self.policy3(p)
-    p = self.softmax(p)
-    # p = p * mask
-    # p = p / p.sum(dim=1, keepdim=True)
 
     v = self.value1(x)
     v = self.relu(v)

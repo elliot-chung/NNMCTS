@@ -14,7 +14,6 @@ class TTTNet(torch.nn.Module):
     self.value1 = torch.nn.Linear(in_features=256, out_features=128)
     self.value2 = torch.nn.Linear(in_features=128, out_features=1)
 
-    self.softmax = torch.nn.Softmax(dim=1)
     self.tanh = torch.nn.Tanh()
     self.relu = torch.nn.ReLU()
 
@@ -32,7 +31,6 @@ class TTTNet(torch.nn.Module):
     p = self.policy1(x)
     p = self.relu(p)
     p = self.policy2(p)
-    p = self.softmax(p)
 
     v = self.value1(x)
     v = self.relu(v)

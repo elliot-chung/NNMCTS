@@ -1,6 +1,5 @@
 import random
 import weakref
-import numpy as np
 from math import sqrt, log
 from time import time
 
@@ -169,21 +168,18 @@ class NeuralNode(Node):
     tensor = NeuralNode.build_tensor(self)
     with torch.no_grad():
       NeuralNode.model.eval()
-      policy, value = NeuralNode.model(tensor)
-      policy = policy.detach().numpy()[0]
-      value = value.detach().numpy()[0][0]
-      
-    mask = np.array(self.environment.get_mask())
-    policy = policy * mask
-    policy_sum = policy.sum()
-    if policy_sum == 0:
-      policy = mask / mask.sum()
-    else:
-      policy = policy / policy_sum
+      policy_logits, value = NeuralNode.model(tensor)
+      mask = torch.tensor(self.environment.get_mask(), dtype=policy_logits.dtype, device=policy_logits.device).unsqueeze(0)
+      masked_logits = policy_logits.masked_fill(mask == 0, float('-inf'))
 
-    self.neural_policy = policy
+      if mask.sum().item() == 0:
+        masked_policy = mask
+      else:
+        masked_policy = torch.softmax(masked_logits, dim=1)
 
-    reward = value * self.environment.current_turn()
+      self.neural_policy = masked_policy.detach().cpu().numpy()[0]
+
+    reward = value.detach().cpu().item()
     return -reward
 
   def _ucb(self):

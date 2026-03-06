@@ -12,11 +12,11 @@ class TTTRecordDataset(Dataset):
     for record in records:
       for state, policy in zip(record["player_one"]["states"], record["player_one"]["policies"]):
         self.data.append((state, policy))
-        reward = record["winner"] if record["winner"] != 0 else 0.1
+        reward = record["winner"]
         self.rewards.append(reward)
       for state, policy in zip(record["player_two"]["states"], record["player_two"]["policies"]):
         self.data.append((state, policy))
-        reward = -record["winner"] if record["winner"] != 0 else 0.1
+        reward = -record["winner"]
         self.rewards.append(reward)
 
     self.data = torch.Tensor(self.data)
@@ -53,5 +53,6 @@ class TTTRecordDataset(Dataset):
   # State, Policy, Reward
   def __getitem__(self, idx):
     if self.augmented_data is not None:
-      return self.augmented_data[idx][0], self.augmented_data[idx][1], self.rewards[idx % 8]
+      base_idx = idx % len(self.rewards)
+      return self.augmented_data[idx][0], self.augmented_data[idx][1], self.rewards[base_idx]
     return self.data[idx][0], self.data[idx][1], self.rewards[idx]

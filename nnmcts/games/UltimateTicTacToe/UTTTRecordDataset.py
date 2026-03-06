@@ -58,5 +58,6 @@ class UTTTRecordDataset(Dataset):
   # State, Policy, Reward
   def __getitem__(self, idx):
     if self.augmented_data is not None:
-      return self.augmented_data[idx][0], self.augmented_data[idx][1], self.augmented_data[idx][2], self.rewards[idx % 8]
+      base_idx = idx % len(self.rewards)
+      return self.augmented_data[idx][0], self.augmented_data[idx][1], self.augmented_data[idx][2], self.rewards[base_idx]
     return self.data[idx][0], self.data[idx][1], self.data[idx][2], self.rewards[idx]
