@@ -165,10 +165,11 @@ class NeuralNode(Node):
     if self.environment.is_terminal():
       return -(self.environment.get_winner() * self.environment.current_turn())
 
-    tensor = NeuralNode.build_tensor(self)
+    node_cls = type(self)
+    tensor = node_cls.build_tensor(self)
     with torch.no_grad():
-      NeuralNode.model.eval()
-      policy_logits, value = NeuralNode.model(tensor)
+      node_cls.model.eval()
+      policy_logits, value = node_cls.model(tensor)
       mask = torch.tensor(self.environment.get_mask(), dtype=policy_logits.dtype, device=policy_logits.device).unsqueeze(0)
       masked_logits = policy_logits.masked_fill(mask == 0, float('-inf'))
 
