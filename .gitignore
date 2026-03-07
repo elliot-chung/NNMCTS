@@ -2,3 +2,5 @@ venv/
 .cursor/
 .cursorrules
 __pycache__/
+*.pkl
+*.pt
