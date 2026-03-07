@@ -1,6 +1,8 @@
 import argparse
 from pathlib import Path
 
+from tqdm import tqdm
+
 from nnmcts.cli_utils import load_records_file, save_records_file
 from play_matches import run_matches
 from train_model import run_training
@@ -65,8 +67,9 @@ def main():
   latest_checkpoint = args.initial_checkpoint
   cumulative_records = []
 
-  for round_idx in range(1, args.rounds + 1):
-    print(f"=== Round {round_idx}/{args.rounds}: Match Generation ===")
+  round_iterator = tqdm(range(1, args.rounds + 1), desc="Pipeline rounds", unit="round")
+  for round_idx in round_iterator:
+    tqdm.write(f"=== Round {round_idx}/{args.rounds}: Match Generation ===")
     round_dataset_path = datasets_dir / f"round_{round_idx:03d}.pkl"
 
     player_one_type, player_one_model = resolve_round_player(args.player1_type, args.player1_model, latest_checkpoint)
@@ -80,7 +83,7 @@ def main():
         bootstrap_players.append("player2")
       if bootstrap_players:
         joined = ", ".join(bootstrap_players)
-        print(
+        tqdm.write(
           f"Bootstrapping {joined} with random play in round 1 because no checkpoint was provided. "
           "Later rounds will use the newly trained model."
         )
@@ -98,7 +101,7 @@ def main():
       record_output=str(round_dataset_path),
     )
 
-    print(
+    tqdm.write(
       f"Round {round_idx} results: "
       f"P1 {summary['player_one_wins']} | Draw {summary['draws']} | P2 {summary['player_two_wins']}"
     )
@@ -115,7 +118,7 @@ def main():
         {"source_rounds": round_idx},
       )
 
-    print(f"=== Round {round_idx}/{args.rounds}: Training ===")
+    tqdm.write(f"=== Round {round_idx}/{args.rounds}: Training ===")
     checkpoint_output = checkpoints_dir / f"round_{round_idx:03d}.pt"
     train_result = run_training(
       game_type=args.game_type,
@@ -139,14 +142,19 @@ def main():
     )
 
     latest_checkpoint = str(checkpoint_output)
-    print(
+    round_iterator.set_postfix({
+      "latest": Path(latest_checkpoint).name,
+      "train_loss": f"{train_result['final_train_loss']:.4f}",
+      "val_loss": f"{train_result['final_val_loss']:.4f}" if train_result["final_val_loss"] is not None else "n/a",
+    })
+    tqdm.write(
       f"Completed round {round_idx}: "
       f"train_loss={train_result['final_train_loss']:.4f} "
       f"val_loss={train_result['final_val_loss'] if train_result['final_val_loss'] is not None else 'n/a'} "
       f"checkpoint={latest_checkpoint}"
     )
 
-  print(f"Pipeline complete. Latest checkpoint: {latest_checkpoint}")
+  tqdm.write(f"Pipeline complete. Latest checkpoint: {latest_checkpoint}")
   return 0
 
 

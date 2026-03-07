@@ -2,6 +2,7 @@ import argparse
 
 import torch
 from torch import nn
+from tqdm import tqdm
 
 from nnmcts.cli_utils import (
   build_model,
@@ -117,7 +118,8 @@ def run_training(
   spec = get_game_spec(game_type)
 
   history = []
-  for epoch in range(epochs):
+  epoch_iterator = tqdm(range(epochs), desc="Training epochs", unit="epoch")
+  for epoch in epoch_iterator:
     model.train()
     total_loss = 0.0
 
@@ -156,11 +158,16 @@ def run_training(
       "val_loss": avg_val_loss,
     })
 
+    epoch_iterator.set_postfix({
+      "train_loss": f"{avg_train_loss:.4f}",
+      "val_loss": f"{avg_val_loss:.4f}" if avg_val_loss is not None else "n/a",
+    })
+
     if epoch == 0 or (epoch + 1) % log_every == 0 or epoch + 1 == epochs:
       if avg_val_loss is None:
-        print(f"Epoch [{epoch + 1}/{epochs}] Train Loss: {avg_train_loss:.4f}")
+        tqdm.write(f"Epoch [{epoch + 1}/{epochs}] Train Loss: {avg_train_loss:.4f}")
       else:
-        print(f"Epoch [{epoch + 1}/{epochs}] Train Loss: {avg_train_loss:.4f} Val Loss: {avg_val_loss:.4f}")
+        tqdm.write(f"Epoch [{epoch + 1}/{epochs}] Train Loss: {avg_train_loss:.4f} Val Loss: {avg_val_loss:.4f}")
 
   metadata = {
     "epochs": epochs,

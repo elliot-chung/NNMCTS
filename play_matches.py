@@ -1,6 +1,8 @@
 import argparse
 from collections import Counter
 
+from tqdm import tqdm
+
 from nnmcts.arena.Arena import Arena
 from nnmcts.cli_utils import (
   create_environment,
@@ -44,7 +46,8 @@ def run_matches(
   results = Counter()
   records = []
 
-  for _ in range(num_games):
+  match_iterator = tqdm(range(num_games), desc="Playing matches", unit="game")
+  for _ in match_iterator:
     environment = create_environment(game_type)
     player_one = create_player(
       environment,
@@ -76,6 +79,13 @@ def run_matches(
     else:
       winner = arena.play_game(record=False)
     results[winner] += 1
+
+    summary = summarize_results(results, sum(results.values()))
+    match_iterator.set_postfix({
+      "p1": summary["player_one_wins"],
+      "draw": summary["draws"],
+      "p2": summary["player_two_wins"],
+    })
 
   summary = summarize_results(results, num_games)
   if record_output:
