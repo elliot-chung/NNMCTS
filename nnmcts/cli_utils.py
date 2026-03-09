@@ -7,6 +7,7 @@ from typing import Any
 
 import torch
 from torch.utils.data import DataLoader, TensorDataset
+from nnmcts.games.Game import Game
 from nnmcts.games.TicTacToe.TTT import TTTGame
 from nnmcts.games.TicTacToe.TTTNet import TTTNet, build_tensor as ttt_build_tensor
 from nnmcts.games.TicTacToe.TTTRecordDataset import TTTRecordDataset
@@ -45,7 +46,7 @@ def get_game_spec(game_type: str) -> GameSpec:
   return GAME_SPECS[normalize_game_type(game_type)]
 
 
-def create_environment(game_type: str):
+def create_environment(game_type: str) -> Game:
   spec = get_game_spec(game_type)
   return spec.environment_cls()
 
@@ -74,7 +75,7 @@ def save_records_file(path: str | Path, game_type: str, records: list[dict], met
     pickle.dump(payload, handle)
 
 
-def load_records_file(path: str | Path) -> dict:
+def load_records_file(path: str | Path) -> dict[str, Any]:
   with open(path, "rb") as handle:
     payload = pickle.load(handle)
 
@@ -85,7 +86,7 @@ def load_records_file(path: str | Path) -> dict:
   return payload
 
 
-def load_checkpoint_file(path: str | Path, map_location: str | torch.device = "cpu"):
+def load_checkpoint_file(path: str | Path, map_location: str | torch.device = "cpu") -> dict[str, Any]:
   payload = torch.load(path, map_location=map_location)
   if isinstance(payload, dict) and "model_state_dict" in payload:
     return payload
@@ -94,7 +95,7 @@ def load_checkpoint_file(path: str | Path, map_location: str | torch.device = "c
   raise ValueError("Checkpoint must be a state dict or a checkpoint dictionary")
 
 
-def build_model(game_type: str, checkpoint_path: str | None = None, device: str | torch.device = "cpu"):
+def build_model(game_type: str, checkpoint_path: str | None = None, device: str | torch.device = "cpu") -> tuple[torch.nn.Module, dict]:
   spec = get_game_spec(game_type)
   model = spec.model_cls()
   metadata = {}
@@ -152,7 +153,7 @@ def create_player(
   device: str,
   player_name: str,
   model_arg_name: str | None = None,
-):
+) -> Player:
   normalized_type = player_type.lower()
   if normalized_type == "random":
     return Random_Player(environment, is_first)
@@ -170,7 +171,7 @@ def create_player(
   return ScriptNeuralMCTSPlayer(environment, is_first, iter_count, model, spec.build_tensor, player_name)
 
 
-def summarize_results(results: dict[int, int], game_count: int):
+def summarize_results(results: dict[int, int], game_count: int) -> dict[str, Any]:
   player_one_wins = results.get(1, 0)
   draws = results.get(0, 0)
   player_two_wins = results.get(-1, 0)
@@ -199,7 +200,7 @@ def split_records(records: list[dict], val_split: float, seed: int):
   return shuffled[:train_count], shuffled[train_count:]
 
 
-def deduplicate_supervised_dataset(dataset):
+def deduplicate_supervised_dataset(dataset) -> TensorDataset:
   aggregator = OrderedDict()
 
   for sample in dataset:
@@ -247,7 +248,7 @@ def build_record_datasets(
   augment_val: bool,
   deduplicate_train: bool,
   deduplicate_val: bool,
-):
+) -> tuple[TensorDataset, TensorDataset | None]:
   spec = get_game_spec(game_type)
   train_records, val_records = split_records(records, val_split, seed)
 
@@ -268,7 +269,7 @@ def build_record_datasets(
   return train_dataset, val_dataset
 
 
-def create_dataloaders(train_dataset, val_dataset, batch_size: int):
+def create_dataloaders(train_dataset, val_dataset, batch_size: int) -> tuple[DataLoader, DataLoader | None]:
   train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
   val_loader = None
   if val_dataset is not None:
@@ -280,7 +281,7 @@ def format_ratio(value: float) -> str:
   return f"{value:.3f}"
 
 
-def prepare_inputs(game_type: str, batch):
+def prepare_inputs(game_type: str, batch) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
   spec = get_game_spec(game_type)
   if spec.uses_mask:
     states, masks, policies, rewards = batch
