@@ -163,11 +163,7 @@ def run_training(
       "val_loss": f"{avg_val_loss:.4f}" if avg_val_loss is not None else "n/a",
     })
 
-    if epoch == 0 or (epoch + 1) % log_every == 0 or epoch + 1 == epochs:
-      if avg_val_loss is None:
-        tqdm.write(f"Epoch [{epoch + 1}/{epochs}] Train Loss: {avg_train_loss:.4f}")
-      else:
-        tqdm.write(f"Epoch [{epoch + 1}/{epochs}] Train Loss: {avg_train_loss:.4f} Val Loss: {avg_val_loss:.4f}")
+    
 
   metadata = {
     "epochs": epochs,
