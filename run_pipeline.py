@@ -69,7 +69,6 @@ def main():
 
   round_iterator = tqdm(range(1, args.rounds + 1), desc="Pipeline rounds", unit="round")
   for round_idx in round_iterator:
-    tqdm.write(f"=== Round {round_idx}/{args.rounds}: Match Generation ===")
     round_dataset_path = datasets_dir / f"round_{round_idx:03d}.pkl"
 
     player_one_type, player_one_model = resolve_round_player(args.player1_type, args.player1_model, latest_checkpoint)
@@ -101,11 +100,6 @@ def main():
       record_output=str(round_dataset_path),
     )
 
-    tqdm.write(
-      f"Round {round_idx} results: "
-      f"P1 {summary['player_one_wins']} | Draw {summary['draws']} | P2 {summary['player_two_wins']}"
-    )
-
     training_dataset_path = round_dataset_path
     if args.accumulate_records:
       round_payload = load_records_file(round_dataset_path)
@@ -118,7 +112,6 @@ def main():
         {"source_rounds": round_idx},
       )
 
-    tqdm.write(f"=== Round {round_idx}/{args.rounds}: Training ===")
     checkpoint_output = checkpoints_dir / f"round_{round_idx:03d}.pt"
     train_result = run_training(
       game_type=args.game_type,
@@ -147,12 +140,6 @@ def main():
       "train_loss": f"{train_result['final_train_loss']:.4f}",
       "val_loss": f"{train_result['final_val_loss']:.4f}" if train_result["final_val_loss"] is not None else "n/a",
     })
-    tqdm.write(
-      f"Completed round {round_idx}: "
-      f"train_loss={train_result['final_train_loss']:.4f} "
-      f"val_loss={train_result['final_val_loss'] if train_result['final_val_loss'] is not None else 'n/a'} "
-      f"checkpoint={latest_checkpoint}"
-    )
 
   tqdm.write(f"Pipeline complete. Latest checkpoint: {latest_checkpoint}")
   return 0
