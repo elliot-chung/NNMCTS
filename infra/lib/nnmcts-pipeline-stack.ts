@@ -159,7 +159,7 @@ export class NnmctsPipelineStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, "GpuLaunchTemplateName", {
       value: gpuLaunchTemplate.launchTemplateName!,
-      description: "EC2 launch template for GPU training (g4dn.xlarge, auto-shutdown)",
+      description: "EC2 launch template for GPU training (g4dn.xlarge, 1h train / 90m instance cap, auto-shutdown)",
     });
 
     new cdk.CfnOutput(this, "LogGroupName", {

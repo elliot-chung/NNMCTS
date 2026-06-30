@@ -11,6 +11,7 @@ $Region = $awsConfig.Region
 $StackName = $awsConfig.StackName
 
 $ErrorActionPreference = "Stop"
+$RepoRoot = Split-Path -Parent $PSScriptRoot
 
 function Invoke-AwsCli {
   param([string[]]$CommandArgs)
@@ -18,15 +19,6 @@ function Invoke-AwsCli {
   if ($LASTEXITCODE -ne 0) {
     throw "aws command failed: aws $($CommandArgs -join ' ')"
   }
-}
-
-function Test-S3ObjectExists {
-  param([string]$Bucket, [string]$Key)
-  $ErrorActionPreference = "SilentlyContinue"
-  & aws s3api head-object --bucket $Bucket --key $Key --profile $Profile --region $Region 2>$null | Out-Null
-  $exists = $LASTEXITCODE -eq 0
-  $ErrorActionPreference = "Stop"
-  return $exists
 }
 
 function Get-StackOutput {
@@ -40,11 +32,11 @@ function Get-StackOutput {
   return $value.Trim()
 }
 
-$RepoRoot = Split-Path -Parent $PSScriptRoot
 $bucket = Get-StackOutput -Key "ArtifactsBucketName"
 $launchTemplate = Get-StackOutput -Key "GpuLaunchTemplateName"
 $runId = "gpu-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 $sourceKey = "source/nnmcts-$runId.zip"
+$launchedAt = (Get-Date).ToString("o")
 
 Write-Host "Packaging source..."
 $zipPath = & (Join-Path $PSScriptRoot "package_source.ps1")
@@ -52,7 +44,7 @@ $zipPath = & (Join-Path $PSScriptRoot "package_source.ps1")
 Write-Host "Uploading source to s3://$bucket/$sourceKey"
 Invoke-AwsCli @("s3", "cp", $zipPath, "s3://$bucket/$sourceKey")
 
-Write-Host "Launching GPU training instance (g4dn.xlarge, max 1 hour)..."
+Write-Host "Launching GPU training instance (g4dn.xlarge, 1h training / 90m instance cap)..."
 $instanceJson = Invoke-AwsCli @(
   "ec2", "run-instances",
   "--launch-template", "LaunchTemplateName=$launchTemplate",
@@ -61,32 +53,37 @@ $instanceJson = Invoke-AwsCli @(
 ) | ConvertFrom-Json
 
 $instanceId = $instanceJson.Instances[0].InstanceId
-Write-Host "Instance ID: $instanceId"
-Write-Host "Run ID: $runId"
-Write-Host "Training log on instance: /var/log/nnmcts-gpu-train.log"
-Write-Host "Waiting for manifest at s3://$bucket/runs/$runId/manifest.json ..."
 
-$deadline = (Get-Date).AddHours(1.25)
-while ((Get-Date) -lt $deadline) {
-  Start-Sleep -Seconds 30
-  $state = (Invoke-AwsCli @(
-    "ec2", "describe-instances",
-    "--instance-ids", $instanceId,
-    "--query", "Reservations[0].Instances[0].State.Name",
-    "--output", "text"
-  )).Trim()
-  Write-Host "  instance=$state"
-
-  if (Test-S3ObjectExists -Bucket $bucket -Key "runs/$runId/manifest.json") {
-    Write-Host "Training complete."
-    Invoke-AwsCli @("s3", "cp", "s3://$bucket/runs/$runId/manifest.json", "-")
-    Invoke-AwsCli @("s3", "ls", "s3://$bucket/runs/$runId/checkpoints/")
-    exit 0
-  }
-
-  if ($state -in @("terminated", "shutting-down", "stopped", "stopping")) {
-    throw "Instance ended before manifest appeared. Check /var/log/nnmcts-gpu-train.log via SSM or CloudWatch."
-  }
+$artifactsDir = Join-Path $RepoRoot "artifacts"
+if (-not (Test-Path $artifactsDir)) {
+  New-Item -ItemType Directory -Path $artifactsDir | Out-Null
 }
 
-throw "Timed out waiting for training manifest."
+$metadataPath = Join-Path $artifactsDir "latest-gpu-run.json"
+$metadata = [ordered]@{
+  runId = $runId
+  instanceId = $instanceId
+  bucket = $bucket
+  sourceKey = $sourceKey
+  manifestKey = "runs/$runId/manifest.json"
+  profile = $Profile
+  region = $Region
+  stackName = $StackName
+  launchedAt = $launchedAt
+}
+$metadata | ConvertTo-Json | Set-Content -Path $metadataPath -Encoding utf8
+
+Write-Host ""
+Write-Host "GPU training launched."
+Write-Host "  Instance ID:  $instanceId"
+Write-Host "  Run ID:       $runId"
+Write-Host "  Manifest:     s3://$bucket/runs/$runId/manifest.json"
+Write-Host "  Run metadata: $metadataPath"
+Write-Host ""
+Write-Host "Check status and recent logs:"
+Write-Host "  .\scripts\check_gpu_training.ps1"
+Write-Host ""
+Write-Host "Poll until complete:"
+Write-Host "  .\scripts\check_gpu_training.ps1 -Follow"
+Write-Host ""
+Write-Host "Redeploy the CDK stack if you changed cloud/gpu-train.sh since the last deploy."

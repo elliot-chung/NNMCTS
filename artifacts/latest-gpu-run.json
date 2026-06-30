@@ -1,0 +1,11 @@
+﻿{
+    "runId":  "gpu-20260630-160901",
+    "instanceId":  "i-0c9283801b9d4467b",
+    "bucket":  "nnmcts-artifacts-730335282892-us-west-1",
+    "sourceKey":  "source/nnmcts-gpu-20260630-160901.zip",
+    "manifestKey":  "runs/gpu-20260630-160901/manifest.json",
+    "profile":  "personal",
+    "region":  "us-west-1",
+    "stackName":  "NnmctsPipelineStack",
+    "launchedAt":  "2026-06-30T16:09:01.9819167-07:00"
+}

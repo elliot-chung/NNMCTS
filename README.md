@@ -144,15 +144,21 @@ Artifacts appear under `s3://<artifacts-bucket>/runs/<build-id>/checkpoints/`.
 
 ### 4. Run GPU training
 
-Launches an on-demand `g4dn.xlarge`, trains with CUDA, uploads checkpoints, then shuts down:
+Launches an on-demand `g4dn.xlarge`, trains with CUDA, uploads checkpoints, then shuts down. The launch script returns immediately; use the check script to monitor progress:
 
 ```powershell
 .\scripts\run_cloud_pipeline.ps1 -Gpu
 # or
 .\scripts\run_gpu_training.ps1
+
+# Check status and recent logs
+.\scripts\check_gpu_training.ps1
+
+# Poll until the manifest appears or the instance stops
+.\scripts\check_gpu_training.ps1 -Follow
 ```
 
-GPU runs are capped at 1 hour. Logs on the instance: `/var/log/nnmcts-gpu-train.log` (reachable via SSM Session Manager).
+Training is capped at 1 hour; the instance has a 90-minute wall-clock limit (bootstrap + training + upload) and always shuts down when the script exits. Instance logs: `/var/log/nnmcts-gpu-train.log` (fetched via SSM by the check script).
 
 ### 5. Tear down
 

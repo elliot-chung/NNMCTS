@@ -1,0 +1,9 @@
+{
+  "build_id": "nnmcts-smoke-training:82f3a04c-0adb-4a6a-98ea-032ec379fda4",
+  "game_type": "TTT",
+  "rounds": 3,
+  "games_per_round": 50,
+  "epochs": 10,
+  "latest_checkpoint": "round_003.pt",
+  "status": "complete"
+}
