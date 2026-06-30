@@ -11,6 +11,21 @@ AlphaGo used neural networks with MCTS; this project follows the same approach. 
 - Supervised training with augmentation and deduplication
 - Optional AWS pipeline for CPU smoke tests and GPU training
 
+## Technical highlights
+
+### Monte Carlo Tree Search
+
+Four stages: selection (UCB1), expansion, rollout (policy/value from network), backpropagation. `NeuralNode` guides search with the trained network.
+
+### Neural architecture
+
+`TTTNet` and `UTTTNet` use CNNs with separate policy and value heads, canonical state handling, and valid-move masks (UTTT).
+
+### Data pipeline
+
+Multiprocess self-play, symmetry augmentation, deduplication with averaged labels, and train/val splits.
+
+
 ## Requirements
 
 - Python 3.8+
@@ -172,16 +187,3 @@ python scripts\strip_notebook_metadata.py MCTS.ipynb
 
 Do not commit `infra/cdk.out/`, `infra/cdk.context.json`, `infra/node_modules/`, `config/local.json`, or model checkpoints (`.pt`, `.pkl`).
 
-## Technical highlights
-
-### Monte Carlo Tree Search
-
-Four stages: selection (UCB1), expansion, rollout (policy/value from network), backpropagation. `NeuralNode` guides search with the trained network.
-
-### Neural architecture
-
-`TTTNet` and `UTTTNet` use CNNs with separate policy and value heads, canonical state handling, and valid-move masks (UTTT).
-
-### Data pipeline
-
-Multiprocess self-play, symmetry augmentation, deduplication with averaged labels, and train/val splits.
