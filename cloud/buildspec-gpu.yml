@@ -1,0 +1,41 @@
+version: 0.2
+
+env:
+  variables:
+    GAME_TYPE: TTT
+    ROUNDS: "5"
+    GAMES_PER_ROUND: "100"
+    EPOCHS: "20"
+    BATCH_SIZE: "128"
+    MCTS_ITERS: "75"
+    MAX_RUNTIME_SECONDS: "3600"
+    OUTPUT_DIR: output
+    DEVICE: cuda
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.11
+    commands:
+      - echo "Installing PyTorch CUDA and dependencies..."
+      - pip install --quiet torch --index-url https://download.pytorch.org/whl/cu124
+      - pip install --quiet -r requirements.txt
+
+  pre_build:
+    commands:
+      - echo "Run ID ${CODEBUILD_BUILD_ID}"
+      - echo "Artifacts bucket ${ARTIFACTS_BUCKET}"
+      - export PYTHONPATH="${CODEBUILD_SRC_DIR}:${PYTHONPATH:-}"
+      - nvidia-smi
+      - python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else None)"
+      - mkdir -p "${OUTPUT_DIR}/datasets" "${OUTPUT_DIR}/checkpoints"
+
+  build:
+    commands:
+      - echo "Starting NNMCTS pipeline on ${DEVICE} (max ${MAX_RUNTIME_SECONDS}s)..."
+      - PYTHONPATH="${CODEBUILD_SRC_DIR}:${PYTHONPATH:-}" timeout "${MAX_RUNTIME_SECONDS}" python run_pipeline.py --game-type "${GAME_TYPE}" --rounds "${ROUNDS}" --games-per-round "${GAMES_PER_ROUND}" --output-dir "${OUTPUT_DIR}" --device "${DEVICE}" --player1-type mcts --player2-type mcts --player1-iters "${MCTS_ITERS}" --player2-iters "${MCTS_ITERS}" --epochs "${EPOCHS}" --batch-size "${BATCH_SIZE}" --augment-train --deduplicate-train ${INITIAL_CHECKPOINT_FLAG}
+
+  post_build:
+    commands:
+      - aws s3 sync "${OUTPUT_DIR}/checkpoints/" "s3://${ARTIFACTS_BUCKET}/runs/${CODEBUILD_BUILD_ID}/checkpoints/"
+      - aws s3 cp manifest.json "s3://${ARTIFACTS_BUCKET}/runs/${CODEBUILD_BUILD_ID}/manifest.json" || true

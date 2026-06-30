@@ -1,6 +1,18 @@
 venv/
+.venv/
+dist/
 .cursor/
 .cursorrules
 __pycache__/
+*.py[cod]
+*$py.class
 *.pkl
 *.pt
+smoke_local/
+config/local.json
+
+# CDK / Node
+infra/node_modules/
+infra/cdk.out/
+infra/cdk.context.json
+infra/dist/

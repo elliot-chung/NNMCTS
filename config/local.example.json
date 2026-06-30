@@ -1,0 +1,5 @@
+{
+  "awsProfile": "default",
+  "region": "us-west-1",
+  "stackName": "NnmctsPipelineStack"
+}
