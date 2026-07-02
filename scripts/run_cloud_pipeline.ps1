@@ -3,7 +3,19 @@ param(
   [string]$Region,
   [switch]$DeployOnly,
   [switch]$RunOnly,
-  [switch]$Gpu
+  [switch]$Gpu,
+  [string]$ConfigPath,
+  [string]$GameType,
+  [int]$Rounds = 0,
+  [int]$GamesPerRound = 0,
+  [int]$Epochs = 0,
+  [int]$BatchSize = 0,
+  [int]$MctsIters = 0,
+  [string]$Player1Type,
+  [string]$Player2Type,
+  [int]$MaxRuntimeSeconds = 0,
+  [int]$MaxTrainingSeconds = 0,
+  [int]$MaxInstanceSeconds = 0
 )
 
 . (Join-Path $PSScriptRoot "Resolve-AwsConfig.ps1")
@@ -13,7 +25,22 @@ $Region = $awsConfig.Region
 $StackName = $awsConfig.StackName
 
 if ($Gpu -and -not $DeployOnly) {
-  & (Join-Path $PSScriptRoot "run_gpu_training.ps1") -Profile $Profile -Region $Region
+  $gpuArgs = @{
+    Profile = $Profile
+    Region = $Region
+    ConfigPath = $ConfigPath
+    GameType = $GameType
+    Rounds = $Rounds
+    GamesPerRound = $GamesPerRound
+    Epochs = $Epochs
+    BatchSize = $BatchSize
+    MctsIters = $MctsIters
+    Player1Type = $Player1Type
+    Player2Type = $Player2Type
+    MaxTrainingSeconds = $MaxTrainingSeconds
+    MaxInstanceSeconds = $MaxInstanceSeconds
+  }
+  & (Join-Path $PSScriptRoot "run_gpu_training.ps1") @gpuArgs
   exit $LASTEXITCODE
 }
 
@@ -68,6 +95,9 @@ if ($DeployOnly) {
   exit 0
 }
 
+. (Join-Path $PSScriptRoot "Resolve-CloudTrainingConfig.ps1")
+$trainingConfig = Resolve-CloudTrainingConfig -Profile smoke -ConfigPath $ConfigPath -GameType $GameType -Rounds $Rounds -GamesPerRound $GamesPerRound -Epochs $Epochs -BatchSize $BatchSize -MctsIters $MctsIters -Player1Type $Player1Type -Player2Type $Player2Type -MaxRuntimeSeconds $MaxRuntimeSeconds
+
 $bucket = Get-StackOutput -Key "ArtifactsBucketName"
 $project = Get-StackOutput -Key "CodeBuildProjectName"
 $sourceKey = "source/nnmcts-$(Get-Date -Format 'yyyyMMdd-HHmmss').zip"
@@ -78,14 +108,24 @@ $zipPath = & (Join-Path $PSScriptRoot "package_source.ps1")
 Write-Host "Uploading source to s3://$bucket/$sourceKey"
 Invoke-AwsCli @("s3", "cp", $zipPath, "s3://$bucket/$sourceKey")
 
-Write-Host "Starting CodeBuild project $project (1 hour max)..."
-$buildJson = Invoke-AwsCli @(
+Write-Host "Starting CodeBuild project $project (max $($trainingConfig.MaxRuntimeSeconds)s)..."
+Write-Host "  gameType=$($trainingConfig.GameType) rounds=$($trainingConfig.Rounds) gamesPerRound=$($trainingConfig.GamesPerRound) epochs=$($trainingConfig.Epochs) batchSize=$($trainingConfig.BatchSize) mctsIters=$($trainingConfig.MctsIters)"
+
+$codeBuildCapSeconds = $trainingConfig.CodeBuildTimeoutMinutes * 60
+if ($trainingConfig.MaxRuntimeSeconds -gt $codeBuildCapSeconds) {
+  Write-Warning "MaxRuntimeSeconds ($($trainingConfig.MaxRuntimeSeconds)) exceeds the deployed CodeBuild project timeout ($codeBuildCapSeconds s). Redeploy after raising timeouts.codeBuildTimeoutMinutes in config/cloud-training.json, or lower -MaxRuntimeSeconds."
+}
+
+$envOverrides = New-CodeBuildEnvironmentOverrides -TrainingConfig $trainingConfig
+$buildJson = Invoke-AwsCli (@(
   "codebuild", "start-build",
   "--project-name", $project,
   "--source-type-override", "S3",
   "--source-location-override", "$bucket/$sourceKey",
+  "--environment-variables-override"
+) + $envOverrides + @(
   "--output", "json"
-) | ConvertFrom-Json
+)) | ConvertFrom-Json
 
 $buildId = $buildJson.build.id
 Write-Host "Build ID: $buildId"

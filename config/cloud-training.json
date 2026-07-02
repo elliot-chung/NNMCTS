@@ -1,0 +1,29 @@
+{
+  "timeouts": {
+    "maxRuntimeSeconds": 3600,
+    "codeBuildTimeoutMinutes": 60,
+    "codeBuildQueuedTimeoutMinutes": 30,
+    "maxInstanceSeconds": 90000,
+    "maxTrainingSeconds": 90000
+  },
+  "smoke": {
+    "gameType": "TTT",
+    "rounds": 3,
+    "gamesPerRound": 50,
+    "epochs": 10,
+    "batchSize": 64,
+    "mctsIters": 50,
+    "player1Type": "mcts",
+    "player2Type": "mcts"
+  },
+  "gpu": {
+    "gameType": "UTTT",
+    "rounds": 20,
+    "gamesPerRound": 20,
+    "epochs": 20,
+    "batchSize": 128,
+    "mctsIters": 50,
+    "player1Type": "nmcts",
+    "player2Type": "nmcts"
+  }
+}

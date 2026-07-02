@@ -1,7 +1,18 @@
 param(
   [string]$Profile,
   [string]$Region,
-  [string]$StackName
+  [string]$StackName,
+  [string]$ConfigPath,
+  [string]$GameType,
+  [int]$Rounds = 0,
+  [int]$GamesPerRound = 0,
+  [int]$Epochs = 0,
+  [int]$BatchSize = 0,
+  [int]$MctsIters = 0,
+  [string]$Player1Type,
+  [string]$Player2Type,
+  [int]$MaxTrainingSeconds = 0,
+  [int]$MaxInstanceSeconds = 0
 )
 
 . (Join-Path $PSScriptRoot "Resolve-AwsConfig.ps1")
@@ -9,6 +20,9 @@ $awsConfig = Resolve-AwsConfig -Profile $Profile -Region $Region -StackName $Sta
 $Profile = $awsConfig.Profile
 $Region = $awsConfig.Region
 $StackName = $awsConfig.StackName
+
+. (Join-Path $PSScriptRoot "Resolve-CloudTrainingConfig.ps1")
+$trainingConfig = Resolve-CloudTrainingConfig -Profile gpu -ConfigPath $ConfigPath -GameType $GameType -Rounds $Rounds -GamesPerRound $GamesPerRound -Epochs $Epochs -BatchSize $BatchSize -MctsIters $MctsIters -Player1Type $Player1Type -Player2Type $Player2Type -MaxTrainingSeconds $MaxTrainingSeconds -MaxInstanceSeconds $MaxInstanceSeconds
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
@@ -32,6 +46,18 @@ function Get-StackOutput {
   return $value.Trim()
 }
 
+function Format-Ec2TagSpecifications {
+  param(
+    [array]$Tags
+  )
+
+  $formattedTags = @()
+  foreach ($tag in $Tags) {
+    $formattedTags += "{Key=$($tag.Key),Value=$($tag.Value)}"
+  }
+  return "ResourceType=instance,Tags=[$($formattedTags -join ',')]"
+}
+
 $bucket = Get-StackOutput -Key "ArtifactsBucketName"
 $launchTemplate = Get-StackOutput -Key "GpuLaunchTemplateName"
 $runId = "gpu-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
@@ -44,11 +70,16 @@ $zipPath = & (Join-Path $PSScriptRoot "package_source.ps1")
 Write-Host "Uploading source to s3://$bucket/$sourceKey"
 Invoke-AwsCli @("s3", "cp", $zipPath, "s3://$bucket/$sourceKey")
 
-Write-Host "Launching GPU training instance (g4dn.xlarge, 1h training / 90m instance cap)..."
+Write-Host "Launching GPU training instance (max $($trainingConfig.MaxTrainingSeconds)s training / $($trainingConfig.MaxInstanceSeconds)s instance cap)..."
+Write-Host "  gameType=$($trainingConfig.GameType) rounds=$($trainingConfig.Rounds) gamesPerRound=$($trainingConfig.GamesPerRound) epochs=$($trainingConfig.Epochs) batchSize=$($trainingConfig.BatchSize) mctsIters=$($trainingConfig.MctsIters)"
+
+$instanceTags = New-GpuTrainingTags -TrainingConfig $trainingConfig -Bucket $bucket -SourceKey $sourceKey -RunId $runId
+$tagSpecifications = Format-Ec2TagSpecifications -Tags $instanceTags
+
 $instanceJson = Invoke-AwsCli @(
   "ec2", "run-instances",
-  "--launch-template", "LaunchTemplateName=$launchTemplate",
-  "--tag-specifications", "ResourceType=instance,Tags=[{Key=Name,Value=nnmcts-gpu-training},{Key=nnmcts-bucket,Value=$bucket},{Key=nnmcts-source-key,Value=$sourceKey},{Key=nnmcts-run-id,Value=$runId}]",
+  "--launch-template", "LaunchTemplateName=$launchTemplate,Version=`$Latest",
+  "--tag-specifications", $tagSpecifications,
   "--output", "json"
 ) | ConvertFrom-Json
 
@@ -70,8 +101,10 @@ $metadata = [ordered]@{
   region = $Region
   stackName = $StackName
   launchedAt = $launchedAt
+  trainingConfig = $trainingConfig
 }
-$metadata | ConvertTo-Json | Set-Content -Path $metadataPath -Encoding utf8
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+[System.IO.File]::WriteAllText($metadataPath, ($metadata | ConvertTo-Json -Depth 4), $utf8NoBom)
 
 Write-Host ""
 Write-Host "GPU training launched."
@@ -85,5 +118,3 @@ Write-Host "  .\scripts\check_gpu_training.ps1"
 Write-Host ""
 Write-Host "Poll until complete:"
 Write-Host "  .\scripts\check_gpu_training.ps1 -Follow"
-Write-Host ""
-Write-Host "Redeploy the CDK stack if you changed cloud/gpu-train.sh since the last deploy."

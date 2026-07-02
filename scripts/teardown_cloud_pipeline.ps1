@@ -83,10 +83,10 @@ function Stop-GpuInstances {
   }
 
   Write-Host "Terminating GPU instances: $($instanceIds -join ', ')"
-  Invoke-AwsCli @(
+  Invoke-AwsCli (@(
     "ec2", "terminate-instances",
-    "--instance-ids", $instanceIds
-  ) | Out-Null
+    "--instance-ids"
+  ) + @($instanceIds)) | Out-Null
   return $instanceIds
 }
 
@@ -100,12 +100,13 @@ function Wait-InstancesTerminated {
   Write-Host "Waiting for instances to terminate..."
   $deadline = (Get-Date).AddMinutes(10)
   while ((Get-Date) -lt $deadline) {
-    $states = Invoke-AwsCli @(
+    $states = Invoke-AwsCli (@(
       "ec2", "describe-instances",
-      "--instance-ids", $InstanceIds,
+      "--instance-ids"
+    ) + @($InstanceIds) + @(
       "--query", "Reservations[].Instances[].State.Name",
       "--output", "json"
-    ) | ConvertFrom-Json
+    )) | ConvertFrom-Json
 
     $active = $states | Where-Object { $_ -notin @("terminated", "shutting-down") }
     if (-not $active -or $active.Count -eq 0) {
@@ -121,7 +122,13 @@ function Wait-InstancesTerminated {
 }
 
 function Stop-CodeBuildRuns {
-  if (-not (Invoke-AwsCliAllowFailure @("codebuild", "batch-get-projects", "--names", $CodeBuildProject))) {
+  $projectsResult = Invoke-AwsCli @(
+    "codebuild", "batch-get-projects",
+    "--names", $CodeBuildProject,
+    "--output", "json"
+  ) | ConvertFrom-Json
+
+  if (-not $projectsResult.projects -or @($projectsResult.projects).Count -eq 0) {
     Write-Host "CodeBuild project '$CodeBuildProject' not found."
     return
   }
@@ -138,11 +145,13 @@ function Stop-CodeBuildRuns {
     return
   }
 
-  $builds = Invoke-AwsCli @(
+  $idList = @($buildIds.ids)
+  $builds = Invoke-AwsCli (@(
     "codebuild", "batch-get-builds",
-    "--ids", $buildIds.ids,
+    "--ids"
+  ) + $idList + @(
     "--output", "json"
-  ) | ConvertFrom-Json
+  )) | ConvertFrom-Json
 
   $activeBuilds = $builds.builds | Where-Object { $_.buildStatus -in @("IN_PROGRESS", "STOPPING") }
   if (-not $activeBuilds) {
@@ -192,7 +201,8 @@ function Remove-VersionedS3Bucket {
       $payload = @{ Objects = $objects; Quiet = $true } | ConvertTo-Json -Compress -Depth 4
       $tempFile = [System.IO.Path]::GetTempFileName()
       try {
-        Set-Content -Path $tempFile -Value $payload -Encoding utf8
+        $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::WriteAllText($tempFile, $payload, $utf8NoBom)
         $deleteFile = "file://" + ($tempFile -replace '\\', '/')
         Invoke-AwsCli @("s3api", "delete-objects", "--bucket", $Bucket, "--delete", $deleteFile) | Out-Null
       }
