@@ -1,8 +1,9 @@
 #!/bin/bash
 set -euo pipefail
-exec > /var/log/nnmcts-gpu-train.log 2>&1
 
 readonly DEFAULT_MAX_INSTANCE_SECONDS=5400
+readonly CLOUDWATCH_LOG_GROUP="/nnmcts/gpu-training"
+readonly CLOUD_INIT_OUTPUT_LOG="/var/log/cloud-init-output.log"
 readonly DEFAULT_MAX_TRAINING_SECONDS=3600
 readonly DEFAULT_GAME_TYPE=UTTT
 readonly DEFAULT_ROUNDS=5
@@ -36,8 +37,8 @@ upload_artifacts() {
     aws s3 sync "${OUTPUT_DIR}/checkpoints/" "s3://${BUCKET}/runs/${RUN_ID}/checkpoints/"
   fi
   aws s3 cp manifest.json "s3://${BUCKET}/runs/${RUN_ID}/manifest.json"
-  if [[ -f /var/log/nnmcts-gpu-train.log ]]; then
-    aws s3 cp /var/log/nnmcts-gpu-train.log "s3://${BUCKET}/runs/${RUN_ID}/gpu-train.log" || true
+  if [[ -f "${CLOUD_INIT_OUTPUT_LOG}" ]]; then
+    aws s3 cp "${CLOUD_INIT_OUTPUT_LOG}" "s3://${BUCKET}/runs/${RUN_ID}/gpu-train.log" || true
   fi
   MANIFEST_UPLOADED=1
 }
@@ -61,6 +62,40 @@ imds_get() {
   curl -fsS "http://169.254.169.254$1" \
     -H "X-aws-ec2-metadata-token: ${IMDS_TOKEN}"
 }
+
+setup_cloudwatch_agent() {
+  local instance_id="$1"
+  echo "$(date -Is) Configuring CloudWatch agent for ${CLOUDWATCH_LOG_GROUP}/${instance_id}."
+
+  dnf install -y amazon-cloudwatch-agent
+  cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<EOF
+{
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "${CLOUD_INIT_OUTPUT_LOG}",
+            "log_group_name": "${CLOUDWATCH_LOG_GROUP}",
+            "log_stream_name": "${instance_id}",
+            "timezone": "UTC"
+          }
+        ]
+      }
+    }
+  }
+}
+EOF
+
+  /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+    -a fetch-config \
+    -m ec2 \
+    -s \
+    -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+}
+
+INSTANCE_ID=$(imds_get "/latest/meta-data/instance-id")
+setup_cloudwatch_agent "${INSTANCE_ID}"
 
 get_tag() {
   local key="$1"

@@ -106,6 +106,7 @@ function Wait-ForGpuRun {
     [string]$Bucket,
     [string]$RunId,
     [string]$InstanceId,
+    [string]$LogGroup,
     [string]$Label
   )
 
@@ -128,7 +129,7 @@ function Wait-ForGpuRun {
     $state = Get-InstanceState -Id $InstanceId
     Write-Host "  instance=$state (no manifest yet)"
     if ($state -in @("terminated", "shutting-down", "stopped", "stopping")) {
-      throw "$Label instance ended without uploading a manifest. Check CloudWatch/SSM logs for $InstanceId."
+      throw "$Label instance ended without uploading a manifest. Check CloudWatch log group '$LogGroup' stream '$InstanceId' or s3://$Bucket/runs/$RunId/gpu-train.log."
     }
 
     Start-Sleep -Seconds 30
@@ -137,6 +138,7 @@ function Wait-ForGpuRun {
 
 $bucket = Get-StackOutput -Key "ArtifactsBucketName"
 $launchTemplate = Get-StackOutput -Key "GpuLaunchTemplateName"
+$logGroupName = Get-StackOutput -Key "GpuTrainingLogGroupName"
 $runPrefix = if ($TrainingProfile -eq "gpuSmoke") { "gpu-smoke" } else { "gpu" }
 $runId = "$runPrefix-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 $sourceKey = "source/nnmcts-$runId.zip"
@@ -183,6 +185,7 @@ $metadata = [ordered]@{
   profile = $Profile
   region = $Region
   stackName = $StackName
+  logGroupName = $logGroupName
   trainingProfile = $TrainingProfile
   runType = $runType
   smokeThenTrain = [bool]$SmokeThenTrain
@@ -204,7 +207,7 @@ Write-Host "  Run metadata: $metadataPath"
 Write-Host ""
 
 if ($Wait) {
-  Wait-ForGpuRun -Bucket $bucket -RunId $runId -InstanceId $instanceId -Label $runLabel
+  Wait-ForGpuRun -Bucket $bucket -RunId $runId -InstanceId $instanceId -LogGroup $logGroupName -Label $runLabel
   return
 }
 

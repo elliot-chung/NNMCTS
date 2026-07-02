@@ -250,7 +250,7 @@ Training limits and GPU defaults come from `config/cloud-training.json`. Per-run
 .\scripts\run_gpu_training.ps1 -Rounds 10 -MaxTrainingSeconds 7200
 ```
 
-The instance always shuts down when the script exits. Instance logs: `/var/log/nnmcts-gpu-train.log` (fetched via SSM by the check script).
+The instance always shuts down when the script exits. Live logs stream to CloudWatch log group `/nnmcts/gpu-training` (one stream per instance ID); `.\scripts\check_gpu_training.ps1` fetches recent events from there. A full log archive is also uploaded to `s3://<bucket>/runs/<run-id>/gpu-train.log` when the run completes.
 
 ### 5. Tear down
 

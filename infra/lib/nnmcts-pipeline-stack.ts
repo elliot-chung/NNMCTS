@@ -2,6 +2,7 @@ import * as cdk from "aws-cdk-lib";
 import * as cr from "aws-cdk-lib/custom-resources";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import { Construct } from "constructs";
 import * as fs from "fs";
@@ -57,6 +58,13 @@ export class NnmctsPipelineStack extends cdk.Stack {
       ],
     });
     artifactsBucket.grantReadWrite(gpuInstanceRole);
+
+    const gpuLogGroup = new logs.LogGroup(this, "GpuTrainingLogGroup", {
+      logGroupName: "/nnmcts/gpu-training",
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    gpuLogGroup.grantWrite(gpuInstanceRole);
 
     const gpuInstanceProfile = new iam.CfnInstanceProfile(this, "GpuTrainingInstanceProfile", {
       roles: [gpuInstanceRole.roleName],
@@ -143,6 +151,11 @@ export class NnmctsPipelineStack extends cdk.Stack {
     new cdk.CfnOutput(this, "GpuLaunchTemplateName", {
       value: gpuLaunchTemplate.launchTemplateName!,
       description: `EC2 launch template for GPU training (g4dn.xlarge, ${trainingConfig.timeouts.maxTrainingSeconds}s train / ${trainingConfig.timeouts.maxInstanceSeconds}s instance cap, auto-shutdown)`,
+    });
+
+    new cdk.CfnOutput(this, "GpuTrainingLogGroupName", {
+      value: gpuLogGroup.logGroupName,
+      description: "CloudWatch log group for GPU training instance stdout",
     });
   }
 }
