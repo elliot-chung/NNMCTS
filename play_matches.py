@@ -46,31 +46,38 @@ def run_matches(
   results = Counter()
   records = []
 
+  player_one = None
+  player_two = None
+
   match_iterator = tqdm(range(num_games), desc="Playing matches", unit="game")
   for _ in match_iterator:
     environment = create_environment(game_type)
-    player_one = create_player(
-      environment,
-      game_type,
-      player_one_type,
-      True,
-      player_one_iters,
-      player_one_model,
-      device,
-      "player_one",
-      "--player1-model",
-    )
-    player_two = create_player(
-      environment,
-      game_type,
-      player_two_type,
-      False,
-      player_two_iters,
-      player_two_model,
-      device,
-      "player_two",
-      "--player2-model",
-    )
+    if player_one is None:
+      player_one = create_player(
+        environment,
+        game_type,
+        player_one_type,
+        True,
+        player_one_iters,
+        player_one_model,
+        device,
+        "player_one",
+        "--player1-model",
+      )
+      player_two = create_player(
+        environment,
+        game_type,
+        player_two_type,
+        False,
+        player_two_iters,
+        player_two_model,
+        device,
+        "player_two",
+        "--player2-model",
+      )
+    else:
+      player_one.environment = environment
+      player_two.environment = environment
 
     arena = Arena(environment, player_one, player_two)
     if record_output:
