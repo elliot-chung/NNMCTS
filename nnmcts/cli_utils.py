@@ -270,10 +270,25 @@ def build_record_datasets(
 
 
 def create_dataloaders(train_dataset, val_dataset, batch_size: int) -> tuple[DataLoader, DataLoader | None]:
-  train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+  train_size = len(train_dataset)
+  if train_size == 0:
+    raise ValueError("Training dataset is empty")
+  if train_size < 2:
+    raise ValueError(
+      f"Need at least 2 training samples for batch normalization, got {train_size}. "
+      "Increase games-per-round or disable val_split/deduplicate-train."
+    )
+
+  effective_batch = min(batch_size, train_size)
+  train_loader = DataLoader(
+    train_dataset,
+    batch_size=effective_batch,
+    shuffle=True,
+    drop_last=train_size > effective_batch,
+  )
   val_loader = None
   if val_dataset is not None:
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    val_loader = DataLoader(val_dataset, batch_size=min(batch_size, len(val_dataset)), shuffle=False)
   return train_loader, val_loader
 
 
