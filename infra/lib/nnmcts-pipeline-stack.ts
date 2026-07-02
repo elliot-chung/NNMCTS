@@ -1,5 +1,6 @@
 import * as cdk from "aws-cdk-lib";
 import * as codebuild from "aws-cdk-lib/aws-codebuild";
+import * as cr from "aws-cdk-lib/custom-resources";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
@@ -8,9 +9,20 @@ import { Construct } from "constructs";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { smokeBuildSpec } from "./smoke-buildspec";
+import { loadCloudTrainingConfig } from "./cloud-training-config";
+import { createPipelineBuildSpec, trainingProfileToBuildSpecOptions } from "./pipeline-buildspec";
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
+const trainingConfig = loadCloudTrainingConfig(
+  path.join(currentDir, "../../config/cloud-training.json"),
+);
+const smokeBuildSpec = createPipelineBuildSpec(
+  trainingProfileToBuildSpecOptions(
+    trainingConfig.smoke,
+    "cpu",
+    trainingConfig.timeouts.maxRuntimeSeconds,
+  ),
+);
 const gpuUserData = fs.readFileSync(path.join(currentDir, "../../cloud/gpu-train.sh"), "utf8");
 
 export class NnmctsPipelineStack extends cdk.Stack {
@@ -42,12 +54,17 @@ export class NnmctsPipelineStack extends cdk.Stack {
     artifactsBucket.grantReadWrite(codeBuildRole);
     logGroup.grantWrite(codeBuildRole);
 
+    const codeBuildTimeoutMinutes = Math.max(
+      trainingConfig.timeouts.codeBuildTimeoutMinutes,
+      Math.ceil(trainingConfig.timeouts.maxRuntimeSeconds / 60),
+    );
+
     const smokeProject = new codebuild.Project(this, "SmokeTrainingProject", {
       projectName: "nnmcts-smoke-training",
-      description: "End-to-end NNMCTS CPU smoke training (max 1 hour)",
+      description: `End-to-end NNMCTS CPU smoke training (max ${codeBuildTimeoutMinutes} min)`,
       role: codeBuildRole,
-      timeout: cdk.Duration.hours(1),
-      queuedTimeout: cdk.Duration.minutes(30),
+      timeout: cdk.Duration.minutes(codeBuildTimeoutMinutes),
+      queuedTimeout: cdk.Duration.minutes(trainingConfig.timeouts.codeBuildQueuedTimeoutMinutes),
       environment: {
         buildImage: codebuild.LinuxBuildImage.STANDARD_7_0,
         computeType: codebuild.ComputeType.MEDIUM,
@@ -142,6 +159,31 @@ export class NnmctsPipelineStack extends cdk.Stack {
       },
     });
 
+    // New launch-template versions are not promoted to default automatically.
+    new cr.AwsCustomResource(this, "GpuLaunchTemplateDefaultVersion", {
+      onCreate: {
+        service: "EC2",
+        action: "modifyLaunchTemplate",
+        parameters: {
+          LaunchTemplateId: gpuLaunchTemplate.attrLaunchTemplateId,
+          DefaultVersion: gpuLaunchTemplate.attrLatestVersionNumber,
+        },
+        physicalResourceId: cr.PhysicalResourceId.of("GpuLaunchTemplateDefaultVersion"),
+      },
+      onUpdate: {
+        service: "EC2",
+        action: "modifyLaunchTemplate",
+        parameters: {
+          LaunchTemplateId: gpuLaunchTemplate.attrLaunchTemplateId,
+          DefaultVersion: gpuLaunchTemplate.attrLatestVersionNumber,
+        },
+        physicalResourceId: cr.PhysicalResourceId.of("GpuLaunchTemplateDefaultVersion"),
+      },
+      policy: cr.AwsCustomResourcePolicy.fromSdkCalls({
+        resources: cr.AwsCustomResourcePolicy.ANY_RESOURCE,
+      }),
+    });
+
     new cdk.CfnOutput(this, "ArtifactsBucketName", {
       value: artifactsBucket.bucketName,
       description: "S3 bucket for training runs and source uploads",
@@ -159,7 +201,7 @@ export class NnmctsPipelineStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, "GpuLaunchTemplateName", {
       value: gpuLaunchTemplate.launchTemplateName!,
-      description: "EC2 launch template for GPU training (g4dn.xlarge, 1h train / 90m instance cap, auto-shutdown)",
+      description: `EC2 launch template for GPU training (g4dn.xlarge, ${trainingConfig.timeouts.maxTrainingSeconds}s train / ${trainingConfig.timeouts.maxInstanceSeconds}s instance cap, auto-shutdown)`,
     });
 
     new cdk.CfnOutput(this, "LogGroupName", {

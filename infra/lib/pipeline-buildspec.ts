@@ -1,4 +1,5 @@
 import * as codebuild from "aws-cdk-lib/aws-codebuild";
+import { TrainingProfile } from "./cloud-training-config";
 
 export interface PipelineBuildSpecOptions {
   device: "cpu" | "cuda";
@@ -8,8 +9,29 @@ export interface PipelineBuildSpecOptions {
   epochs?: string;
   batchSize?: string;
   mctsIters?: string;
+  player1Type?: string;
+  player2Type?: string;
   maxRuntimeSeconds?: string;
   outputDir?: string;
+}
+
+export function trainingProfileToBuildSpecOptions(
+  profile: TrainingProfile,
+  device: "cpu" | "cuda",
+  maxRuntimeSeconds: number,
+): PipelineBuildSpecOptions {
+  return {
+    device,
+    gameType: profile.gameType,
+    rounds: String(profile.rounds),
+    gamesPerRound: String(profile.gamesPerRound),
+    epochs: String(profile.epochs),
+    batchSize: String(profile.batchSize),
+    mctsIters: String(profile.mctsIters),
+    player1Type: profile.player1Type,
+    player2Type: profile.player2Type,
+    maxRuntimeSeconds: String(maxRuntimeSeconds),
+  };
 }
 
 function torchInstallCommand(device: "cpu" | "cuda"): string {
@@ -19,27 +41,7 @@ function torchInstallCommand(device: "cpu" | "cuda"): string {
   return "pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu";
 }
 
-function defaultTrainingParams(device: "cpu" | "cuda") {
-  if (device === "cuda") {
-    return {
-      rounds: "5",
-      gamesPerRound: "100",
-      epochs: "20",
-      batchSize: "128",
-      mctsIters: "75",
-    };
-  }
-  return {
-    rounds: "3",
-    gamesPerRound: "50",
-    epochs: "10",
-    batchSize: "64",
-    mctsIters: "50",
-  };
-}
-
 export function createPipelineBuildSpec(options: PipelineBuildSpecOptions) {
-  const defaults = defaultTrainingParams(options.device);
   const device = options.device;
   const installCommands = [
     device === "cuda"
@@ -65,7 +67,12 @@ export function createPipelineBuildSpec(options: PipelineBuildSpecOptions) {
   ];
 
   if (device === "cuda") {
-    preBuildCommands.splice(3, 0, "nvidia-smi", 'python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else None)"');
+    preBuildCommands.splice(
+      3,
+      0,
+      "nvidia-smi",
+      'python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else None)"',
+    );
   }
 
   return codebuild.BuildSpec.fromObject({
@@ -73,11 +80,13 @@ export function createPipelineBuildSpec(options: PipelineBuildSpecOptions) {
     env: {
       variables: {
         GAME_TYPE: options.gameType ?? "TTT",
-        ROUNDS: options.rounds ?? defaults.rounds,
-        GAMES_PER_ROUND: options.gamesPerRound ?? defaults.gamesPerRound,
-        EPOCHS: options.epochs ?? defaults.epochs,
-        BATCH_SIZE: options.batchSize ?? defaults.batchSize,
-        MCTS_ITERS: options.mctsIters ?? defaults.mctsIters,
+        ROUNDS: options.rounds ?? "3",
+        GAMES_PER_ROUND: options.gamesPerRound ?? "50",
+        EPOCHS: options.epochs ?? "10",
+        BATCH_SIZE: options.batchSize ?? "64",
+        MCTS_ITERS: options.mctsIters ?? "50",
+        PLAYER1_TYPE: options.player1Type ?? "mcts",
+        PLAYER2_TYPE: options.player2Type ?? "mcts",
         MAX_RUNTIME_SECONDS: options.maxRuntimeSeconds ?? "3600",
         OUTPUT_DIR: options.outputDir ?? "output",
         DEVICE: device === "cuda" ? "cuda" : "cpu",
@@ -96,7 +105,7 @@ export function createPipelineBuildSpec(options: PipelineBuildSpecOptions) {
       build: {
         commands: [
           'echo "Starting NNMCTS pipeline on ${DEVICE} (max ${MAX_RUNTIME_SECONDS}s)..."',
-          'PYTHONPATH="${CODEBUILD_SRC_DIR}:${PYTHONPATH:-}" timeout "${MAX_RUNTIME_SECONDS}" python run_pipeline.py --game-type "${GAME_TYPE}" --rounds "${ROUNDS}" --games-per-round "${GAMES_PER_ROUND}" --output-dir "${OUTPUT_DIR}" --device "${DEVICE}" --player1-type mcts --player2-type mcts --player1-iters "${MCTS_ITERS}" --player2-iters "${MCTS_ITERS}" --epochs "${EPOCHS}" --batch-size "${BATCH_SIZE}" --augment-train --deduplicate-train ${INITIAL_CHECKPOINT_FLAG}',
+          'PYTHONPATH="${CODEBUILD_SRC_DIR}:${PYTHONPATH:-}" timeout "${MAX_RUNTIME_SECONDS}" python run_pipeline.py --game-type "${GAME_TYPE}" --rounds "${ROUNDS}" --games-per-round "${GAMES_PER_ROUND}" --output-dir "${OUTPUT_DIR}" --device "${DEVICE}" --player1-type "${PLAYER1_TYPE}" --player2-type "${PLAYER2_TYPE}" --player1-iters "${MCTS_ITERS}" --player2-iters "${MCTS_ITERS}" --epochs "${EPOCHS}" --batch-size "${BATCH_SIZE}" --augment-train --deduplicate-train ${INITIAL_CHECKPOINT_FLAG}',
         ],
       },
       post_build: {
@@ -114,6 +123,3 @@ export function createPipelineBuildSpec(options: PipelineBuildSpecOptions) {
     },
   });
 }
-
-export const smokeBuildSpec = createPipelineBuildSpec({ device: "cpu" });
-export const gpuBuildSpec = createPipelineBuildSpec({ device: "cuda" });

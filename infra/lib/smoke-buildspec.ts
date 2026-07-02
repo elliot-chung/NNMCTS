@@ -1,1 +1,5 @@
-export { smokeBuildSpec, gpuBuildSpec, createPipelineBuildSpec } from "./pipeline-buildspec";
+export {
+  createPipelineBuildSpec,
+  trainingProfileToBuildSpecOptions,
+} from "./pipeline-buildspec";
+export type { PipelineBuildSpecOptions } from "./pipeline-buildspec";
