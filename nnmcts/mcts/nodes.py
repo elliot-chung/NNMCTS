@@ -166,7 +166,8 @@ class NeuralNode(Node):
       return -(self.environment.get_winner() * self.environment.current_turn())
 
     node_cls = type(self)
-    tensor = node_cls.build_tensor(self)
+    device = next(node_cls.model.parameters()).device
+    tensor = node_cls.build_tensor(self).to(device)
     with torch.no_grad():
       node_cls.model.eval()
       policy_logits, value = node_cls.model(tensor)
