@@ -300,112 +300,89 @@ export class UTTTGame {
 
 
 
-  isValid(move: Move): boolean {
+  private finishedBoards(): number[] {
+    return this.metaState
+      .map((value, index) => (value !== 0 ? index : -1))
+      .filter((index) => index !== -1);
+  }
 
-    const [boardId, cellId] = move;
+  private freeMoves(): Move[] {
+    const finishedBoards = this.finishedBoards();
+    const moves: Move[] = [];
 
-    if (boardId < 0 || boardId > 8 || cellId < 0 || cellId > 8) {
+    for (let boardId = 0; boardId < 9; boardId++) {
+      if (finishedBoards.includes(boardId)) {
+        continue;
+      }
 
+      for (let cellId = 0; cellId < 9; cellId++) {
+        const idx = UTTTGame.translate([boardId, cellId]);
+        if (this.state[idx] === 0) {
+          moves.push([boardId, cellId]);
+        }
+      }
+    }
+
+    return moves;
+  }
+
+  private mustPlayOnBoard(boardId: number): boolean {
+    if (this.metaState[boardId] !== 0) {
       return false;
-
     }
 
-
-
-    const idx = UTTTGame.translate(move);
-
-    if (this.previousMove === null) {
-
-      return this.state[idx] === 0;
-
-    }
-
-    if (move[0] === this.previousMove[1]) {
-
-      return this.state[idx] === 0;
-
+    for (let cellId = 0; cellId < 9; cellId++) {
+      if (this.state[UTTTGame.translate([boardId, cellId])] === 0) {
+        return true;
+      }
     }
 
     return false;
-
   }
 
+  isValid(move: Move): boolean {
+    const [boardId, cellId] = move;
 
+    if (boardId < 0 || boardId > 8 || cellId < 0 || cellId > 8) {
+      return false;
+    }
+
+    const idx = UTTTGame.translate(move);
+    if (this.state[idx] !== 0) {
+      return false;
+    }
+
+    if (this.previousMove === null) {
+      return !this.finishedBoards().includes(boardId);
+    }
+
+    const forcedBoard = this.previousMove[1];
+    if (!this.mustPlayOnBoard(forcedBoard)) {
+      return !this.finishedBoards().includes(boardId);
+    }
+
+    return boardId === forcedBoard;
+  }
 
   validMoves(): Move[] {
-
-    const finishedBoards = this.metaState
-
-      .map((value, index) => (value !== 0 ? index : -1))
-
-      .filter((index) => index !== -1);
-
-
-
-    const forcedBoard =
-
-      this.previousMove !== null ? this.previousMove[1] : null;
-
-
-
-    if (forcedBoard === null || this.metaState[forcedBoard] !== 0) {
-
-      const moves: Move[] = [];
-
-      for (let boardId = 0; boardId < 9; boardId++) {
-
-        if (finishedBoards.includes(boardId)) {
-
-          continue;
-
-        }
-
-        for (let cellId = 0; cellId < 9; cellId++) {
-
-          const idx = UTTTGame.translate([boardId, cellId]);
-
-          if (this.state[idx] === 0) {
-
-            moves.push([boardId, cellId]);
-
-          }
-
-        }
-
-      }
-
-      return moves;
-
+    if (this.previousMove === null) {
+      return this.freeMoves();
     }
 
-
+    const forcedBoard = this.previousMove[1];
+    if (!this.mustPlayOnBoard(forcedBoard)) {
+      return this.freeMoves();
+    }
 
     const moves: Move[] = [];
-
     for (let cellId = 0; cellId < 9; cellId++) {
-
       const idx = UTTTGame.translate([forcedBoard, cellId]);
-
       if (this.state[idx] === 0) {
-
         moves.push([forcedBoard, cellId]);
-
       }
-
     }
-
-
-
-    if (moves.length === 0) {
-
-      throw new Error("No valid moves");
-
-    }
-
-
 
     return moves;
-
   }
 
 

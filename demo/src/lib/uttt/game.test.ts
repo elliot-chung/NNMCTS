@@ -102,6 +102,50 @@ describe("UTTTGame", () => {
 
     expect(moves.some((m) => m[0] !== Position.TOPLEFT)).toBe(true);
 
+    for (const move of moves) {
+      expect(game.isValid(move)).toBe(true);
+    }
+
+  });
+
+
+
+  it("falls back to free moves when the forced board has no open cells", () => {
+
+    const game = new UTTTGame();
+
+    fillBoard(
+
+      game,
+
+      Position.TOPLEFT,
+
+      [1, -1, 1, -1, 1, -1, -1, 1, -1],
+
+    );
+
+    game.metaState[Position.TOPLEFT] = 0;
+
+    game.previousMove = [Position.MIDDLECENTER, Position.TOPLEFT];
+
+    game.turn = 1;
+
+
+
+    const moves = game.validMoves();
+
+
+
+    expect(moves.length).toBeGreaterThan(0);
+
+    expect(moves.every((move) => move[0] !== Position.TOPLEFT)).toBe(true);
+
+    expect(() => game.isTerminal()).not.toThrow();
+
+    for (const move of moves) {
+      expect(game.isValid(move)).toBe(true);
+    }
+
   });
 
 
