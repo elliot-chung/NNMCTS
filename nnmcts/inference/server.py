@@ -94,7 +94,8 @@ class InferenceServer:
     self._ctx = mp.get_context("spawn")
     self._manager = self._ctx.Manager()
     self.results_dict = self._manager.dict()
-    self.request_queue = self._ctx.Queue()
+    # Manager queue proxies are picklable for spawn-based worker pools; raw mp.Queue is not.
+    self.request_queue = self._manager.Queue()
     self._process: mp.Process | None = None
 
   def start(self):

@@ -1,25 +1,18 @@
 import itertools
 import threading
 import time
+import uuid
 
 import torch
 
 
 class InferenceClient:
-  _id_counter = itertools.count()
-  _id_lock = threading.Lock()
-
   def __init__(self, request_queue, results_dict):
     self.request_queue = request_queue
     self.results_dict = results_dict
 
-  @classmethod
-  def _next_request_id(cls) -> int:
-    with cls._id_lock:
-      return next(cls._id_counter)
-
   def evaluate(self, tensor: torch.Tensor, mask: torch.Tensor | None = None, uses_mask: bool = False) -> tuple:
-    request_id = self._next_request_id()
+    request_id = str(uuid.uuid4())
     payload = tensor.detach().cpu()
     if payload.dim() == 3:
       payload = payload.unsqueeze(0)
