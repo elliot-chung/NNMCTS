@@ -1,0 +1,17 @@
+{
+  "models": [
+    {
+      "id": "uttt-v1",
+      "gameType": "UTTT",
+      "onnxPath": "/models/uttt-v1.onnx",
+      "checkpointSource": "artifacts/gpu-20260701-192839/checkpoints/round_020.pt",
+      "inputShape": [1, 2, 81],
+      "policySize": 81,
+      "defaultMctsIters": 50,
+      "trainingConfig": {
+        "rounds": 20,
+        "mctsIters": 50
+      }
+    }
+  ]
+}

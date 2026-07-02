@@ -45,7 +45,7 @@ class Human_Player(Player):
     return move, None
 
 from nnmcts.mcts.mcts import mcts
-from nnmcts.mcts.nodes import Node, NeuralNode
+from nnmcts.mcts.nodes import Node
 
 class MCTS_Player(Player):
   def __init__(self, environment, is_first=True, iter_count=100):
@@ -55,16 +55,5 @@ class MCTS_Player(Player):
   def on_my_turn(self):
     env_copy = self.environment.copy()
     n = Node(env_copy, env_copy.is_terminal(), None, None)
-    n, policy = mcts(n, self.iter_count)
-    return n.action, policy
-
-class Neural_MCTS_Player(Player):
-  def __init__(self, environment, is_first=True, iter_count=100):
-    super().__init__(environment, is_first)
-    self.iter_count = iter_count
-
-  def on_my_turn(self):
-    env_copy = self.environment.copy()
-    n = NeuralNode(env_copy, env_copy.is_terminal(), None, None)
     n, policy = mcts(n, self.iter_count)
     return n.action, policy

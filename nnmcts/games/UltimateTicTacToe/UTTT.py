@@ -87,27 +87,49 @@ class UTTTGame(Game):
   def get_state(self):
     return self.state
 
+  def _finished_boards(self) -> list[int]:
+    return [i for i, e in enumerate(self.meta_state) if e != 0]
+
+  def _free_moves(self) -> list[Tuple[Position, Position]]:
+    finished_boards = self._finished_boards()
+    return [
+      (i, j)
+      for i in range(9)
+      for j in range(9)
+      if i not in finished_boards and self.state[self.translate((i, j))] == 0
+    ]
+
+  def _must_play_on_board(self, board_id: int) -> bool:
+    if self.meta_state[board_id] != 0:
+      return False
+    return any(self.state[self.translate((board_id, i))] == 0 for i in range(9))
+
   def is_valid(self, move: Tuple[Position, Position]) -> bool:
     try:
       idx = self.translate(move)
     except ValueError:
       return False
+    if self.state[idx] != 0:
+      return False
+
     if self.previous_move is None:
-      return self.state[idx] == 0
-    if move[0] == self.previous_move[1]:
-      return self.state[idx] == 0
-    return False
+      return move[0] not in self._finished_boards()
+
+    board_id = self.previous_move[1]
+    if not self._must_play_on_board(board_id):
+      return move[0] not in self._finished_boards()
+
+    return move[0] == board_id
 
   def valid_moves(self) -> list[Tuple[Position, Position]]:
-    finished_boards = [i for i, e in enumerate(self.meta_state) if e != 0 ]
-    board_id = self.previous_move[1] if self.previous_move is not None else None
+    if self.previous_move is None:
+      return self._free_moves()
 
-    if self.previous_move is None or self.meta_state[board_id] != 0:
-      return [(i, j) for i in range(9) for j in range(9) if i not in finished_boards and self.state[self.translate((i, j))] == 0 ]
-    moves = [(board_id, i) for i in range(9) if self.state[self.translate((board_id, i))] == 0]
-    if len(moves) == 0:
-      raise ValueError("No valid moves")
-    return moves
+    board_id = self.previous_move[1]
+    if not self._must_play_on_board(board_id):
+      return self._free_moves()
+
+    return [(board_id, i) for i in range(9) if self.state[self.translate((board_id, i))] == 0]
 
   def is_terminal(self) -> bool:
     return self.get_winner() != 0 or len(self.valid_moves()) == 0
