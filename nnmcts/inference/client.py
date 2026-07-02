@@ -14,8 +14,6 @@ class InferenceClient:
   def evaluate(self, tensor: torch.Tensor, mask: torch.Tensor | None = None, uses_mask: bool = False) -> tuple:
     request_id = str(uuid.uuid4())
     payload = tensor.detach().cpu()
-    if payload.dim() == 3:
-      payload = payload.unsqueeze(0)
     mask_payload = None
     if mask is not None:
       mask_payload = mask.detach().cpu()

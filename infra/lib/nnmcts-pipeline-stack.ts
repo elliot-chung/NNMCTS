@@ -15,6 +15,7 @@ const trainingConfig = loadCloudTrainingConfig(
   path.join(currentDir, "../../config/cloud-training.json"),
 );
 const gpuUserData = fs.readFileSync(path.join(currentDir, "../../cloud/gpu-train.sh"), "utf8");
+const gpuLogGroupName = "/nnmcts/gpu-training";
 
 export class NnmctsPipelineStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -59,11 +60,33 @@ export class NnmctsPipelineStack extends cdk.Stack {
     });
     artifactsBucket.grantReadWrite(gpuInstanceRole);
 
-    const gpuLogGroup = new logs.LogGroup(this, "GpuTrainingLogGroup", {
-      logGroupName: "/nnmcts/gpu-training",
-      retention: logs.RetentionDays.ONE_MONTH,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    // The log group may already exist from a prior deploy (RETAIN) or manual setup.
+    // Ensure it exists without failing CloudFormation, then reference it for IAM.
+    new cr.AwsCustomResource(this, "EnsureGpuTrainingLogGroup", {
+      onCreate: {
+        service: "CloudWatchLogs",
+        action: "createLogGroup",
+        parameters: { logGroupName: gpuLogGroupName },
+        physicalResourceId: cr.PhysicalResourceId.of(gpuLogGroupName),
+        ignoreErrorCodesMatching: "ResourceAlreadyExistsException",
+      },
+      onUpdate: {
+        service: "CloudWatchLogs",
+        action: "createLogGroup",
+        parameters: { logGroupName: gpuLogGroupName },
+        physicalResourceId: cr.PhysicalResourceId.of(gpuLogGroupName),
+        ignoreErrorCodesMatching: "ResourceAlreadyExistsException",
+      },
+      policy: cr.AwsCustomResourcePolicy.fromSdkCalls({
+        resources: cr.AwsCustomResourcePolicy.ANY_RESOURCE,
+      }),
     });
+
+    const gpuLogGroup = logs.LogGroup.fromLogGroupName(
+      this,
+      "GpuTrainingLogGroup",
+      gpuLogGroupName,
+    );
     gpuLogGroup.grantWrite(gpuInstanceRole);
 
     const gpuInstanceProfile = new iam.CfnInstanceProfile(this, "GpuTrainingInstanceProfile", {

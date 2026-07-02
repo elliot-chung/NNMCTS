@@ -54,7 +54,13 @@ if (-not $RunOnly) {
 
     Write-Host "Deploying $StackName to $Region..."
     npx cdk bootstrap "aws://$account/$Region" --profile $Profile
+    if ($LASTEXITCODE -ne 0) {
+      throw "CDK bootstrap failed for aws://$account/$Region"
+    }
     npx cdk deploy $StackName --profile $Profile --require-approval never
+    if ($LASTEXITCODE -ne 0) {
+      throw "CDK deploy failed for $StackName. Fix infrastructure errors before launching training."
+    }
   }
   finally {
     Pop-Location

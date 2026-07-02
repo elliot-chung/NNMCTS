@@ -81,6 +81,18 @@ function Get-InstanceState {
   return "$($result.Output)".Trim()
 }
 
+function Convert-AwsCliOutputToText {
+  param($Output)
+
+  if ($null -eq $Output) {
+    return ""
+  }
+  if ($Output -is [System.Array]) {
+    return ($Output | ForEach-Object { "$_" }) -join "`n"
+  }
+  return "$Output"
+}
+
 function Get-CloudWatchLogs {
   param(
     [string]$LogGroup,
@@ -88,16 +100,30 @@ function Get-CloudWatchLogs {
     [int]$Lines
   )
 
-  $result = Invoke-AwsCliAllowFailure @(
-    "logs", "get-log-events",
-    "--log-group-name", $LogGroup,
-    "--log-stream-name", $StreamName,
-    "--limit", "$Lines",
-    "--start-from-head", "false",
-    "--output", "json"
-  )
+  $previousPythonUtf8 = $env:PYTHONUTF8
+  $env:PYTHONUTF8 = "1"
+  try {
+    $result = Invoke-AwsCliAllowFailure @(
+      "logs", "get-log-events",
+      "--log-group-name", $LogGroup,
+      "--log-stream-name", $StreamName,
+      "--limit", "$Lines",
+      "--no-start-from-head",
+      "--no-cli-pager",
+      "--output", "json"
+    )
+  }
+  finally {
+    if ($null -eq $previousPythonUtf8) {
+      Remove-Item Env:PYTHONUTF8 -ErrorAction SilentlyContinue
+    }
+    else {
+      $env:PYTHONUTF8 = $previousPythonUtf8
+    }
+  }
+
   if ($result.ExitCode -ne 0) {
-    $errorText = "$($result.Output)"
+    $errorText = Convert-AwsCliOutputToText -Output $result.Output
     if ($errorText -match "ResourceNotFoundException") {
       Write-Host ""
       Write-Host "=== Recent CloudWatch logs ==="
@@ -110,7 +136,15 @@ function Get-CloudWatchLogs {
     return
   }
 
-  $payload = $result.Output | ConvertFrom-Json
+  $jsonText = Convert-AwsCliOutputToText -Output $result.Output
+  if (-not $jsonText) {
+    Write-Host ""
+    Write-Host "=== Recent CloudWatch logs ==="
+    Write-Host "No log events yet (instance may still be booting)."
+    return
+  }
+
+  $payload = $jsonText | ConvertFrom-Json
   $events = @($payload.events)
   if ($events.Count -eq 0) {
     Write-Host ""

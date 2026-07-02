@@ -55,6 +55,13 @@ function Invoke-AwsCliAllowFailure {
   return $exitCode -eq 0
 }
 
+function Test-StackExists {
+  return Invoke-AwsCliAllowFailure @(
+    "cloudformation", "describe-stacks",
+    "--stack-name", $StackName
+  )
+}
+
 function Get-StackOutput {
   param([string]$Key)
   $value = Invoke-AwsCli @(
@@ -64,6 +71,15 @@ function Get-StackOutput {
     "--output", "text"
   )
   return $value.Trim()
+}
+
+function Require-StackOutput {
+  param([string]$Key)
+  $value = Get-StackOutput -Key $Key
+  if ([string]::IsNullOrWhiteSpace($value) -or $value -eq "None") {
+    throw "Stack '$StackName' is missing output '$Key'. Deploy the stack first: .\scripts\run_cloud_pipeline.ps1 -DeployOnly"
+  }
+  return $value
 }
 
 function Format-Ec2TagSpecifications {
@@ -136,9 +152,13 @@ function Wait-ForGpuRun {
   }
 }
 
-$bucket = Get-StackOutput -Key "ArtifactsBucketName"
-$launchTemplate = Get-StackOutput -Key "GpuLaunchTemplateName"
-$logGroupName = Get-StackOutput -Key "GpuTrainingLogGroupName"
+if (-not (Test-StackExists)) {
+  throw "CloudFormation stack '$StackName' was not found in $Region. Deploy it first: .\scripts\run_cloud_pipeline.ps1 -DeployOnly"
+}
+
+$bucket = Require-StackOutput -Key "ArtifactsBucketName"
+$launchTemplate = Require-StackOutput -Key "GpuLaunchTemplateName"
+$logGroupName = Require-StackOutput -Key "GpuTrainingLogGroupName"
 $runPrefix = if ($TrainingProfile -eq "gpuSmoke") { "gpu-smoke" } else { "gpu" }
 $runId = "$runPrefix-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 $sourceKey = "source/nnmcts-$runId.zip"
