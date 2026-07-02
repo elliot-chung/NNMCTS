@@ -10,39 +10,39 @@ export interface TrainingProfile {
   mctsIters: number;
   player1Type: string;
   player2Type: string;
+  selfPlayWorkers?: number;
 }
 
 export interface CloudTrainingTimeouts {
-  maxRuntimeSeconds: number;
-  codeBuildTimeoutMinutes: number;
-  codeBuildQueuedTimeoutMinutes: number;
   maxInstanceSeconds: number;
   maxTrainingSeconds: number;
+  maxSmokeInstanceSeconds: number;
+  maxSmokeTrainingSeconds: number;
 }
 
 export interface CloudTrainingConfig {
   timeouts: CloudTrainingTimeouts;
-  smoke: TrainingProfile;
+  gpuSmoke: TrainingProfile;
   gpu: TrainingProfile;
 }
 
 const DEFAULT_CONFIG: CloudTrainingConfig = {
   timeouts: {
-    maxRuntimeSeconds: 3600,
-    codeBuildTimeoutMinutes: 60,
-    codeBuildQueuedTimeoutMinutes: 30,
     maxInstanceSeconds: 5400,
     maxTrainingSeconds: 3600,
+    maxSmokeInstanceSeconds: 1800,
+    maxSmokeTrainingSeconds: 600,
   },
-  smoke: {
-    gameType: "TTT",
-    rounds: 3,
-    gamesPerRound: 50,
-    epochs: 10,
-    batchSize: 64,
-    mctsIters: 50,
+  gpuSmoke: {
+    gameType: "UTTT",
+    rounds: 1,
+    gamesPerRound: 2,
+    epochs: 1,
+    batchSize: 32,
+    mctsIters: 10,
     player1Type: "mcts",
     player2Type: "mcts",
+    selfPlayWorkers: 1,
   },
   gpu: {
     gameType: "UTTT",
@@ -53,6 +53,7 @@ const DEFAULT_CONFIG: CloudTrainingConfig = {
     mctsIters: 75,
     player1Type: "nmcts",
     player2Type: "nmcts",
+    selfPlayWorkers: 3,
   },
 };
 
@@ -72,10 +73,13 @@ export function loadCloudTrainingConfig(configPath?: string): CloudTrainingConfi
     return DEFAULT_CONFIG;
   }
 
-  const parsed = JSON.parse(fs.readFileSync(resolvedPath, "utf8")) as Partial<CloudTrainingConfig>;
+  const parsed = JSON.parse(fs.readFileSync(resolvedPath, "utf8")) as Partial<CloudTrainingConfig> & {
+    smoke?: TrainingProfile;
+  };
+  const gpuSmoke = parsed.gpuSmoke ?? parsed.smoke;
   return {
     timeouts: mergeTimeouts(DEFAULT_CONFIG.timeouts, parsed.timeouts),
-    smoke: mergeProfile(DEFAULT_CONFIG.smoke, parsed.smoke),
+    gpuSmoke: mergeProfile(DEFAULT_CONFIG.gpuSmoke, gpuSmoke),
     gpu: mergeProfile(DEFAULT_CONFIG.gpu, parsed.gpu),
   };
 }

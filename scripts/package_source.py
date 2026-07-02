@@ -38,7 +38,7 @@ def package_repo(repo_root: Path, output_path: Path) -> None:
 
 
 def main() -> None:
-  parser = argparse.ArgumentParser(description="Package NNMCTS source for CodeBuild.")
+  parser = argparse.ArgumentParser(description="Package NNMCTS source for cloud GPU training.")
   parser.add_argument(
     "--repo-root",
     type=Path,

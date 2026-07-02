@@ -15,14 +15,38 @@ readonly DEFAULT_PLAYER2_TYPE=nmcts
 readonly DEFAULT_SELF_PLAY_WORKERS=3
 
 START_TIME=$(date +%s)
+BUCKET=""
+RUN_ID=""
+OUTPUT_DIR=""
+MANIFEST_UPLOADED=0
 
 shutdown_instance() {
   echo "$(date -Is) Shutting down instance."
   /sbin/shutdown -h now 2>/dev/null || shutdown -h now || true
 }
 
+upload_artifacts() {
+  local status="$1"
+  if [[ -z "${BUCKET}" || -z "${RUN_ID}" || -z "${OUTPUT_DIR}" ]]; then
+    return 0
+  fi
+
+  write_manifest "${status}"
+  if [[ -d "${OUTPUT_DIR}/checkpoints" ]] && compgen -G "${OUTPUT_DIR}/checkpoints/"'*.pt' > /dev/null; then
+    aws s3 sync "${OUTPUT_DIR}/checkpoints/" "s3://${BUCKET}/runs/${RUN_ID}/checkpoints/"
+  fi
+  aws s3 cp manifest.json "s3://${BUCKET}/runs/${RUN_ID}/manifest.json"
+  if [[ -f /var/log/nnmcts-gpu-train.log ]]; then
+    aws s3 cp /var/log/nnmcts-gpu-train.log "s3://${BUCKET}/runs/${RUN_ID}/gpu-train.log" || true
+  fi
+  MANIFEST_UPLOADED=1
+}
+
 on_exit() {
   local code=$?
+  if [[ $code -ne 0 && "${MANIFEST_UPLOADED}" -eq 0 && -n "${BUCKET}" && -n "${RUN_ID}" ]]; then
+    upload_artifacts "failed" || true
+  fi
   if [[ $code -ne 0 ]]; then
     echo "$(date -Is) Exiting with status ${code}."
   fi
@@ -94,6 +118,7 @@ require_time_remaining() {
 
 write_manifest() {
   local status="$1"
+  local phase="${2:-training}"
   python -c "
 import json, pathlib
 checkpoints = sorted(pathlib.Path('${OUTPUT_DIR}/checkpoints').glob('*.pt'))
@@ -106,21 +131,76 @@ manifest = {
     'epochs': int('${EPOCHS}'),
     'latest_checkpoint': checkpoints[-1].name if checkpoints else None,
     'status': '${status}',
+    'phase': '${phase}',
 }
 pathlib.Path('manifest.json').write_text(json.dumps(manifest, indent=2))
 "
 }
 
-upload_artifacts() {
-  local status="$1"
-  write_manifest "${status}"
-  if [[ -d "${OUTPUT_DIR}/checkpoints" ]] && compgen -G "${OUTPUT_DIR}/checkpoints/"'*.pt' > /dev/null; then
-    aws s3 sync "${OUTPUT_DIR}/checkpoints/" "s3://${BUCKET}/runs/${RUN_ID}/checkpoints/"
+training_limit() {
+  local requested="$1"
+  local remaining
+  remaining=$(seconds_remaining)
+  if (( remaining > requested )); then
+    echo "${requested}"
+  else
+    echo "${remaining}"
   fi
-  aws s3 cp manifest.json "s3://${BUCKET}/runs/${RUN_ID}/manifest.json"
-  if [[ -f /var/log/nnmcts-gpu-train.log ]]; then
-    aws s3 cp /var/log/nnmcts-gpu-train.log "s3://${BUCKET}/runs/${RUN_ID}/gpu-train.log" || true
+}
+
+run_training_phase() {
+  local phase="$1"
+  local requested_seconds="$2"
+  local game_type="$3"
+  local rounds="$4"
+  local games_per_round="$5"
+  local epochs="$6"
+  local batch_size="$7"
+  local mcts_iters="$8"
+  local player1_type="$9"
+  local player2_type="${10}"
+  local self_play_workers="${11}"
+
+  local limit
+  limit=$(training_limit "${requested_seconds}")
+  if (( limit < 60 )); then
+    echo "$(date -Is) Insufficient time remaining (${limit}s) for ${phase}."
+    return 1
   fi
+
+  echo "$(date -Is) Starting ${phase} on ${game_type} (limit ${limit}s, workers ${self_play_workers})."
+  set +e
+  timeout "${limit}" python run_pipeline.py \
+    --game-type "${game_type}" \
+    --rounds "${rounds}" \
+    --games-per-round "${games_per_round}" \
+    --output-dir "${OUTPUT_DIR}" \
+    --device cuda \
+    --player1-type "${player1_type}" \
+    --player2-type "${player2_type}" \
+    --player1-iters "${mcts_iters}" \
+    --player2-iters "${mcts_iters}" \
+    --epochs "${epochs}" \
+    --batch-size "${batch_size}" \
+    --self-play-workers "${self_play_workers}" \
+    --batched-inference \
+    --amp \
+    --augment-train \
+    --deduplicate-train
+  local train_exit=$?
+  set -e
+
+  if [[ $train_exit -eq 124 ]]; then
+    echo "$(date -Is) ${phase} timed out after ${limit}s."
+    return 124
+  fi
+  if [[ $train_exit -ne 0 ]]; then
+    echo "$(date -Is) ${phase} failed with exit code ${train_exit}."
+    return "$train_exit"
+  fi
+
+  echo "$(date -Is) ${phase} completed successfully."
+  return 0
 }
 
 REGION=$(imds_get "/latest/meta-data/placement/region")
@@ -138,12 +218,13 @@ MCTS_ITERS=$(get_tag "nnmcts-mcts-iters" "${DEFAULT_MCTS_ITERS}")
 PLAYER1_TYPE=$(get_tag "nnmcts-player1-type" "${DEFAULT_PLAYER1_TYPE}")
 PLAYER2_TYPE=$(get_tag "nnmcts-player2-type" "${DEFAULT_PLAYER2_TYPE}")
 SELF_PLAY_WORKERS=$(get_tag "nnmcts-self-play-workers" "${DEFAULT_SELF_PLAY_WORKERS}")
+RUN_SMOKE=$(get_tag "nnmcts-run-smoke" "false")
 
 export AWS_DEFAULT_REGION="${REGION}"
 WORKDIR=/opt/nnmcts
 OUTPUT_DIR="${WORKDIR}/output"
 
-echo "$(date -Is) GPU training bootstrap: run_id=${RUN_ID} bucket=${BUCKET} source_key=${SOURCE_KEY} region=${REGION}"
+echo "$(date -Is) GPU training bootstrap: run_id=${RUN_ID} bucket=${BUCKET} source_key=${SOURCE_KEY} region=${REGION} run_smoke=${RUN_SMOKE}"
 
 mkdir -p "${WORKDIR}"
 cd "${WORKDIR}"
@@ -167,46 +248,56 @@ python -c "import torch; print('cuda', torch.cuda.is_available(), torch.cuda.get
 
 mkdir -p "${OUTPUT_DIR}/datasets" "${OUTPUT_DIR}/checkpoints"
 
-train_limit=$(seconds_remaining)
-if (( train_limit > MAX_TRAINING_SECONDS )); then
-  train_limit=$MAX_TRAINING_SECONDS
-fi
-if (( train_limit < 60 )); then
-  echo "$(date -Is) Insufficient time remaining (${train_limit}s) for training."
-  upload_artifacts "failed"
-  exit 1
-fi
+if [[ "${RUN_SMOKE}" == "true" ]]; then
+  SMOKE_GAME_TYPE=$(get_tag "nnmcts-smoke-game-type" "${GAME_TYPE}")
+  SMOKE_ROUNDS=$(get_tag "nnmcts-smoke-rounds" "1")
+  SMOKE_GAMES_PER_ROUND=$(get_tag "nnmcts-smoke-games-per-round" "2")
+  SMOKE_EPOCHS=$(get_tag "nnmcts-smoke-epochs" "1")
+  SMOKE_BATCH_SIZE=$(get_tag "nnmcts-smoke-batch-size" "32")
+  SMOKE_MCTS_ITERS=$(get_tag "nnmcts-smoke-mcts-iters" "10")
+  SMOKE_PLAYER1_TYPE=$(get_tag "nnmcts-smoke-player1-type" "mcts")
+  SMOKE_PLAYER2_TYPE=$(get_tag "nnmcts-smoke-player2-type" "mcts")
+  SMOKE_SELF_PLAY_WORKERS=$(get_tag "nnmcts-smoke-self-play-workers" "1")
+  SMOKE_MAX_TRAINING_SECONDS=$(get_tag "nnmcts-smoke-max-training-seconds" "600")
 
-echo "$(date -Is) Starting training on ${GAME_TYPE} (limit ${train_limit}s, instance limit ${MAX_INSTANCE_SECONDS}s, workers ${SELF_PLAY_WORKERS})."
-set +e
-timeout "${train_limit}" python run_pipeline.py \
-  --game-type "${GAME_TYPE}" \
-  --rounds "${ROUNDS}" \
-  --games-per-round "${GAMES_PER_ROUND}" \
-  --output-dir "${OUTPUT_DIR}" \
-  --device cuda \
-  --player1-type "${PLAYER1_TYPE}" \
-  --player2-type "${PLAYER2_TYPE}" \
-  --player1-iters "${MCTS_ITERS}" \
-  --player2-iters "${MCTS_ITERS}" \
-  --epochs "${EPOCHS}" \
-  --batch-size "${BATCH_SIZE}" \
-  --self-play-workers "${SELF_PLAY_WORKERS}" \
-  --batched-inference \
-  --amp \
-  --augment-train \
-  --deduplicate-train
-train_exit=$?
-set -e
+  if ! run_training_phase \
+    "smoke test" \
+    "${SMOKE_MAX_TRAINING_SECONDS}" \
+    "${SMOKE_GAME_TYPE}" \
+    "${SMOKE_ROUNDS}" \
+    "${SMOKE_GAMES_PER_ROUND}" \
+    "${SMOKE_EPOCHS}" \
+    "${SMOKE_BATCH_SIZE}" \
+    "${SMOKE_MCTS_ITERS}" \
+    "${SMOKE_PLAYER1_TYPE}" \
+    "${SMOKE_PLAYER2_TYPE}" \
+    "${SMOKE_SELF_PLAY_WORKERS}"; then
+    upload_artifacts "failed"
+    exit 1
+  fi
 
-if [[ $train_exit -eq 124 ]]; then
-  echo "$(date -Is) Training timed out after ${train_limit}s."
-  upload_artifacts "timed_out"
-  exit 0
+  rm -rf "${OUTPUT_DIR}/datasets" "${OUTPUT_DIR}/checkpoints"
+  mkdir -p "${OUTPUT_DIR}/datasets" "${OUTPUT_DIR}/checkpoints"
+  require_time_remaining
 fi
 
-if [[ $train_exit -ne 0 ]]; then
-  echo "$(date -Is) Training failed with exit code ${train_exit}."
+if ! run_training_phase \
+  "training" \
+  "${MAX_TRAINING_SECONDS}" \
+  "${GAME_TYPE}" \
+  "${ROUNDS}" \
+  "${GAMES_PER_ROUND}" \
+  "${EPOCHS}" \
+  "${BATCH_SIZE}" \
+  "${MCTS_ITERS}" \
+  "${PLAYER1_TYPE}" \
+  "${PLAYER2_TYPE}" \
+  "${SELF_PLAY_WORKERS}"; then
+  train_exit=$?
+  if [[ $train_exit -eq 124 ]]; then
+    upload_artifacts "timed_out"
+    exit 0
+  fi
   upload_artifacts "failed"
   exit "$train_exit"
 fi

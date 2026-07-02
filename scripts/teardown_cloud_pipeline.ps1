@@ -3,7 +3,6 @@ param(
   [string]$Region,
   [string]$StackName,
   [string]$GpuInstanceTag = "nnmcts-gpu-training",
-  [string]$CodeBuildProject = "nnmcts-smoke-training",
   [switch]$KeepArtifacts,
   [switch]$Force
 )
@@ -121,49 +120,6 @@ function Wait-InstancesTerminated {
   Write-Warning "Timed out waiting for instance termination. Continuing teardown."
 }
 
-function Stop-CodeBuildRuns {
-  $projectsResult = Invoke-AwsCli @(
-    "codebuild", "batch-get-projects",
-    "--names", $CodeBuildProject,
-    "--output", "json"
-  ) | ConvertFrom-Json
-
-  if (-not $projectsResult.projects -or @($projectsResult.projects).Count -eq 0) {
-    Write-Host "CodeBuild project '$CodeBuildProject' not found."
-    return
-  }
-
-  $buildIds = Invoke-AwsCli @(
-    "codebuild", "list-builds-for-project",
-    "--project-name", $CodeBuildProject,
-    "--max-items", "10",
-    "--output", "json"
-  ) | ConvertFrom-Json
-
-  if (-not $buildIds.ids) {
-    Write-Host "No recent CodeBuild runs found."
-    return
-  }
-
-  $idList = @($buildIds.ids)
-  $builds = Invoke-AwsCli (@(
-    "codebuild", "batch-get-builds",
-    "--ids"
-  ) + $idList + @(
-    "--output", "json"
-  )) | ConvertFrom-Json
-
-  $activeBuilds = $builds.builds | Where-Object { $_.buildStatus -in @("IN_PROGRESS", "STOPPING") }
-  if (-not $activeBuilds) {
-    Write-Host "No in-progress CodeBuild runs."
-    return
-  }
-
-  foreach ($build in $activeBuilds) {
-    Write-Host "Stopping CodeBuild run $($build.id)..."
-    Invoke-AwsCli @("codebuild", "stop-build", "--id", $build.id) | Out-Null
-  }
-}
 
 function Remove-VersionedS3Bucket {
   param([string]$Bucket)
@@ -272,7 +228,6 @@ if (-not $Force) {
 Write-Host "=== NNMCTS cloud pipeline teardown ==="
 $terminatedInstances = Stop-GpuInstances
 Wait-InstancesTerminated -InstanceIds $terminatedInstances
-Stop-CodeBuildRuns
 
 $artifactsBucket = Get-ArtifactsBucketName
 Destroy-Stack

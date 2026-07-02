@@ -1,7 +1,7 @@
 function Resolve-CloudTrainingConfig {
   param(
-    [ValidateSet("smoke", "gpu")]
-    [string]$Profile = "smoke",
+    [ValidateSet("gpuSmoke", "gpu")]
+    [string]$Profile = "gpu",
     [string]$ConfigPath,
     [string]$GameType,
     [int]$Rounds = 0,
@@ -12,7 +12,6 @@ function Resolve-CloudTrainingConfig {
     [string]$Player1Type,
     [string]$Player2Type,
     [int]$SelfPlayWorkers = 0,
-    [int]$MaxRuntimeSeconds = 0,
     [int]$MaxTrainingSeconds = 0,
     [int]$MaxInstanceSeconds = 0
   )
@@ -27,8 +26,17 @@ function Resolve-CloudTrainingConfig {
   }
 
   $fileConfig = Get-Content $ConfigPath -Raw | ConvertFrom-Json
-  $training = if ($Profile -eq "gpu") { $fileConfig.gpu } else { $fileConfig.smoke }
+  if ($Profile -eq "gpu") {
+    $training = $fileConfig.gpu
+  }
+  else {
+    $training = if ($fileConfig.gpuSmoke) { $fileConfig.gpuSmoke } else { $fileConfig.smoke }
+  }
   $timeouts = $fileConfig.timeouts
+
+  $isSmoke = $Profile -eq "gpuSmoke"
+  $defaultMaxTrainingSeconds = if ($isSmoke) { [int]$timeouts.maxSmokeTrainingSeconds } else { [int]$timeouts.maxTrainingSeconds }
+  $defaultMaxInstanceSeconds = if ($isSmoke) { [int]$timeouts.maxSmokeInstanceSeconds } else { [int]$timeouts.maxInstanceSeconds }
 
   $resolved = [ordered]@{
     GameType = if ($GameType) { $GameType } else { $training.gameType }
@@ -39,12 +47,9 @@ function Resolve-CloudTrainingConfig {
     MctsIters = if ($MctsIters -gt 0) { $MctsIters } else { [int]$training.mctsIters }
     Player1Type = if ($Player1Type) { $Player1Type } else { $training.player1Type }
     Player2Type = if ($Player2Type) { $Player2Type } else { $training.player2Type }
-    SelfPlayWorkers = if ($SelfPlayWorkers -gt 0) { $SelfPlayWorkers } elseif ($Profile -eq "gpu" -and $training.PSObject.Properties.Name -contains "selfPlayWorkers") { [int]$training.selfPlayWorkers } else { 1 }
-    MaxRuntimeSeconds = if ($MaxRuntimeSeconds -gt 0) { $MaxRuntimeSeconds } else { [int]$timeouts.maxRuntimeSeconds }
-    MaxTrainingSeconds = if ($MaxTrainingSeconds -gt 0) { $MaxTrainingSeconds } else { [int]$timeouts.maxTrainingSeconds }
-    MaxInstanceSeconds = if ($MaxInstanceSeconds -gt 0) { $MaxInstanceSeconds } else { [int]$timeouts.maxInstanceSeconds }
-    CodeBuildTimeoutMinutes = [int]$timeouts.codeBuildTimeoutMinutes
-    CodeBuildQueuedTimeoutMinutes = [int]$timeouts.codeBuildQueuedTimeoutMinutes
+    SelfPlayWorkers = if ($SelfPlayWorkers -gt 0) { $SelfPlayWorkers } elseif ($training.PSObject.Properties.Name -contains "selfPlayWorkers") { [int]$training.selfPlayWorkers } else { 1 }
+    MaxTrainingSeconds = if ($MaxTrainingSeconds -gt 0) { $MaxTrainingSeconds } else { $defaultMaxTrainingSeconds }
+    MaxInstanceSeconds = if ($MaxInstanceSeconds -gt 0) { $MaxInstanceSeconds } else { $defaultMaxInstanceSeconds }
     ConfigPath = $ConfigPath
     Profile = $Profile
   }
@@ -52,29 +57,26 @@ function Resolve-CloudTrainingConfig {
   return $resolved
 }
 
-function New-CodeBuildEnvironmentOverrides {
+function Add-TrainingConfigTags {
   param(
-    [hashtable]$TrainingConfig
+    [System.Collections.Generic.List[object]]$Tags,
+    [hashtable]$TrainingConfig,
+    [string]$Prefix = ""
   )
 
-  $envMap = [ordered]@{
-    GAME_TYPE = [string]$TrainingConfig.GameType
-    ROUNDS = [string]$TrainingConfig.Rounds
-    GAMES_PER_ROUND = [string]$TrainingConfig.GamesPerRound
-    EPOCHS = [string]$TrainingConfig.Epochs
-    BATCH_SIZE = [string]$TrainingConfig.BatchSize
-    MCTS_ITERS = [string]$TrainingConfig.MctsIters
-    PLAYER1_TYPE = [string]$TrainingConfig.Player1Type
-    PLAYER2_TYPE = [string]$TrainingConfig.Player2Type
-    SELF_PLAY_WORKERS = [string]$TrainingConfig.SelfPlayWorkers
-    MAX_RUNTIME_SECONDS = [string]$TrainingConfig.MaxRuntimeSeconds
+  $tagPrefix = if ($Prefix) { "$Prefix-" } else { "" }
+  $Tags.Add(@{ Key = "nnmcts-${tagPrefix}game-type"; Value = [string]$TrainingConfig.GameType }) | Out-Null
+  $Tags.Add(@{ Key = "nnmcts-${tagPrefix}rounds"; Value = [string]$TrainingConfig.Rounds }) | Out-Null
+  $Tags.Add(@{ Key = "nnmcts-${tagPrefix}games-per-round"; Value = [string]$TrainingConfig.GamesPerRound }) | Out-Null
+  $Tags.Add(@{ Key = "nnmcts-${tagPrefix}epochs"; Value = [string]$TrainingConfig.Epochs }) | Out-Null
+  $Tags.Add(@{ Key = "nnmcts-${tagPrefix}batch-size"; Value = [string]$TrainingConfig.BatchSize }) | Out-Null
+  $Tags.Add(@{ Key = "nnmcts-${tagPrefix}mcts-iters"; Value = [string]$TrainingConfig.MctsIters }) | Out-Null
+  $Tags.Add(@{ Key = "nnmcts-${tagPrefix}player1-type"; Value = [string]$TrainingConfig.Player1Type }) | Out-Null
+  $Tags.Add(@{ Key = "nnmcts-${tagPrefix}player2-type"; Value = [string]$TrainingConfig.Player2Type }) | Out-Null
+  $Tags.Add(@{ Key = "nnmcts-${tagPrefix}self-play-workers"; Value = [string]$TrainingConfig.SelfPlayWorkers }) | Out-Null
+  if ($Prefix) {
+    $Tags.Add(@{ Key = "nnmcts-${tagPrefix}max-training-seconds"; Value = [string]$TrainingConfig.MaxTrainingSeconds }) | Out-Null
   }
-
-  $overrides = @()
-  foreach ($entry in $envMap.GetEnumerator()) {
-    $overrides += "name=$($entry.Key),value=$($entry.Value),type=PLAINTEXT"
-  }
-  return $overrides
 }
 
 function New-GpuTrainingTags {
@@ -82,24 +84,25 @@ function New-GpuTrainingTags {
     [hashtable]$TrainingConfig,
     [string]$Bucket,
     [string]$SourceKey,
-    [string]$RunId
+    [string]$RunId,
+    [string]$RunType = "training",
+    [hashtable]$SmokeConfig
   )
 
-  return @(
-    @{ Key = "Name"; Value = "nnmcts-gpu-training" },
-    @{ Key = "nnmcts-bucket"; Value = $Bucket },
-    @{ Key = "nnmcts-source-key"; Value = $SourceKey },
-    @{ Key = "nnmcts-run-id"; Value = $RunId },
-    @{ Key = "nnmcts-game-type"; Value = [string]$TrainingConfig.GameType },
-    @{ Key = "nnmcts-rounds"; Value = [string]$TrainingConfig.Rounds },
-    @{ Key = "nnmcts-games-per-round"; Value = [string]$TrainingConfig.GamesPerRound },
-    @{ Key = "nnmcts-epochs"; Value = [string]$TrainingConfig.Epochs },
-    @{ Key = "nnmcts-batch-size"; Value = [string]$TrainingConfig.BatchSize },
-    @{ Key = "nnmcts-mcts-iters"; Value = [string]$TrainingConfig.MctsIters },
-    @{ Key = "nnmcts-player1-type"; Value = [string]$TrainingConfig.Player1Type },
-    @{ Key = "nnmcts-player2-type"; Value = [string]$TrainingConfig.Player2Type },
-    @{ Key = "nnmcts-self-play-workers"; Value = [string]$TrainingConfig.SelfPlayWorkers },
-    @{ Key = "nnmcts-max-training-seconds"; Value = [string]$TrainingConfig.MaxTrainingSeconds },
-    @{ Key = "nnmcts-max-instance-seconds"; Value = [string]$TrainingConfig.MaxInstanceSeconds }
-  )
+  $tags = [System.Collections.Generic.List[object]]::new()
+  $tags.Add(@{ Key = "Name"; Value = "nnmcts-gpu-training" }) | Out-Null
+  $tags.Add(@{ Key = "nnmcts-bucket"; Value = $Bucket }) | Out-Null
+  $tags.Add(@{ Key = "nnmcts-source-key"; Value = $SourceKey }) | Out-Null
+  $tags.Add(@{ Key = "nnmcts-run-id"; Value = $RunId }) | Out-Null
+  $tags.Add(@{ Key = "nnmcts-run-type"; Value = $RunType }) | Out-Null
+  $tags.Add(@{ Key = "nnmcts-max-training-seconds"; Value = [string]$TrainingConfig.MaxTrainingSeconds }) | Out-Null
+  $tags.Add(@{ Key = "nnmcts-max-instance-seconds"; Value = [string]$TrainingConfig.MaxInstanceSeconds }) | Out-Null
+
+  if ($SmokeConfig) {
+    $tags.Add(@{ Key = "nnmcts-run-smoke"; Value = "true" }) | Out-Null
+    Add-TrainingConfigTags -Tags $tags -TrainingConfig $SmokeConfig -Prefix "smoke"
+  }
+
+  Add-TrainingConfigTags -Tags $tags -TrainingConfig $TrainingConfig
+  return $tags.ToArray()
 }
