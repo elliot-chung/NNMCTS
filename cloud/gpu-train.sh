@@ -12,6 +12,7 @@ readonly DEFAULT_BATCH_SIZE=128
 readonly DEFAULT_MCTS_ITERS=75
 readonly DEFAULT_PLAYER1_TYPE=nmcts
 readonly DEFAULT_PLAYER2_TYPE=nmcts
+readonly DEFAULT_SELF_PLAY_WORKERS=3
 
 START_TIME=$(date +%s)
 
@@ -136,6 +137,7 @@ BATCH_SIZE=$(get_tag "nnmcts-batch-size" "${DEFAULT_BATCH_SIZE}")
 MCTS_ITERS=$(get_tag "nnmcts-mcts-iters" "${DEFAULT_MCTS_ITERS}")
 PLAYER1_TYPE=$(get_tag "nnmcts-player1-type" "${DEFAULT_PLAYER1_TYPE}")
 PLAYER2_TYPE=$(get_tag "nnmcts-player2-type" "${DEFAULT_PLAYER2_TYPE}")
+SELF_PLAY_WORKERS=$(get_tag "nnmcts-self-play-workers" "${DEFAULT_SELF_PLAY_WORKERS}")
 
 export AWS_DEFAULT_REGION="${REGION}"
 WORKDIR=/opt/nnmcts
@@ -175,7 +177,7 @@ if (( train_limit < 60 )); then
   exit 1
 fi
 
-echo "$(date -Is) Starting training on ${GAME_TYPE} (limit ${train_limit}s, instance limit ${MAX_INSTANCE_SECONDS}s)."
+echo "$(date -Is) Starting training on ${GAME_TYPE} (limit ${train_limit}s, instance limit ${MAX_INSTANCE_SECONDS}s, workers ${SELF_PLAY_WORKERS})."
 set +e
 timeout "${train_limit}" python run_pipeline.py \
   --game-type "${GAME_TYPE}" \
@@ -189,6 +191,9 @@ timeout "${train_limit}" python run_pipeline.py \
   --player2-iters "${MCTS_ITERS}" \
   --epochs "${EPOCHS}" \
   --batch-size "${BATCH_SIZE}" \
+  --self-play-workers "${SELF_PLAY_WORKERS}" \
+  --batched-inference \
+  --amp \
   --augment-train \
   --deduplicate-train
 train_exit=$?

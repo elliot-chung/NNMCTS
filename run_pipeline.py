@@ -42,6 +42,10 @@ def build_parser():
   parser.add_argument("--augment-val", action="store_true")
   parser.add_argument("--deduplicate-train", action="store_true")
   parser.add_argument("--deduplicate-val", action="store_true")
+  parser.add_argument("--self-play-workers", type=int, default=1, help="Parallel self-play worker processes.")
+  parser.add_argument("--batched-inference", action="store_true")
+  parser.add_argument("--show-mcts-timing", action="store_true")
+  parser.add_argument("--amp", action="store_true", help="Enable mixed-precision training on CUDA.")
   return parser
 
 
@@ -98,6 +102,9 @@ def main():
       player_two_model=player_two_model,
       device=args.device,
       record_output=str(round_dataset_path),
+      workers=args.self_play_workers,
+      show_mcts_timing=args.show_mcts_timing,
+      batched_inference=args.batched_inference,
     )
 
     training_dataset_path = round_dataset_path
@@ -132,6 +139,7 @@ def main():
       augment_val=args.augment_val,
       deduplicate_train=args.deduplicate_train,
       deduplicate_val=args.deduplicate_val,
+      use_amp=args.amp,
     )
 
     latest_checkpoint = str(checkpoint_output)

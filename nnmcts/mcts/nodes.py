@@ -5,6 +5,11 @@ from time import time
 
 NODE_LIST = []
 
+
+def clear_node_list():
+  NODE_LIST.clear()
+
+
 class Node:
   def __init__(self, environment, terminal, parent, action):
     self.total_reward = 0
@@ -26,19 +31,31 @@ class Node:
     parent_node = self.parent()
     return (self.total_reward / self.visit_count) + sqrt(1 * log(parent_node.visit_count) / self.visit_count)
 
+  def _expand_child(self, action):
+    if self.child is None:
+      self.child = {}
+
+    if action in self.child:
+      return self.child[action]
+
+    environment = self.environment.copy()
+    environment.make_move(action)
+    node_cls = type(self)
+    child = node_cls(environment, environment.is_terminal(), self, action)
+    self.child[action] = child
+    return child
+
   def _create_child(self):
     if self.terminal:
       return
 
     actions = self.environment.valid_moves()
-    environments = [ self.environment.copy() for action in actions]
-    for action, environment in zip(actions, environments):
-      environment.make_move(action)
+    if self.child is None:
+      self.child = {}
 
-    # Get this class type
-    NodeVariant = type(self)
-
-    self.child = { action: NodeVariant(environment, environment.is_terminal(), self, action) for action, environment in zip(actions, environments)}
+    for action in actions:
+      if action not in self.child:
+        self._expand_child(action)
 
   def _rollout(self):
     new_env = self.environment.copy()
@@ -50,13 +67,30 @@ class Node:
     return -reward
 
   def _traverse_to_leaf(node):
-    while node.child:
-      ucb_scores = {a: c._ucb() for a, c in node.child.items()}
-      max_ucb = max(ucb_scores.values())
-      actions = [a for a, s in ucb_scores.items() if s == max_ucb]
+    while not node.terminal:
+      if isinstance(node, NeuralNode) and node.neural_policy is None:
+        node._evaluate()
 
-      action = random.choice(actions)
+      if node.child is None:
+        node.child = {}
+
+      actions = node.environment.valid_moves()
+      ucb_scores = {}
+      for action in actions:
+        if action in node.child:
+          ucb_scores[action] = node.child[action]._ucb()
+        else:
+          ucb_scores[action] = float('inf')
+
+      max_ucb = max(ucb_scores.values())
+      best_actions = [action for action, score in ucb_scores.items() if score == max_ucb]
+      action = random.choice(best_actions)
+
+      if action not in node.child:
+        node._expand_child(action)
+
       node = node.child[action]
+
     return node
 
   def _update_parents(node, reward):
@@ -89,16 +123,11 @@ class Node:
     end = time()
     update_time = end - start
 
-    start = time()
-    current._create_child()
-    end = time()
-    create_time = end - start
-
     if perf is not None:
       perf["traverse_time"] = traverse_time
       perf["rollout_time"] = rollout_time
       perf["update_time"] = update_time
-      perf["create_time"] = create_time
+      perf["create_time"] = 0.0
 
   def get_policy(self):
     if self.terminal:
@@ -111,7 +140,6 @@ class Node:
     for node in self.child.values():
       policy[self.environment.translate(node.action)] = node.visit_count
 
-    # modified softmax
     sum_p = sum(policy)
     policy = [p / sum_p for p in policy]
 
@@ -127,12 +155,13 @@ class Node:
     visit_list = [node.visit_count for node in self.child.values()]
     max_visit = max(visit_list)
 
-    most_visited_nodes = [c for c in self.child.values() if c.visit_count == max_visit]
+    most_visited_nodes = [child for child in self.child.values() if child.visit_count == max_visit]
     return random.choice(most_visited_nodes)
 
   def detach_parent(self):
     self.parent = None
-    
+
+
 def print_tree(root_node, indent=0):
   print('  ' * indent + f"- Environment: {root_node.environment.get_state()}, Visits: {root_node.visit_count}, Reward: {root_node.total_reward:.2f}")
   if root_node.child:
@@ -140,49 +169,84 @@ def print_tree(root_node, indent=0):
       print('  ' * (indent + 1) + f"Action: {action}")
       print_tree(child_node, indent + 2)
 
+
 import torch
-      
+
+
 class NeuralNode(Node):
   model = None
   build_tensor = None
+  inference_client = None
+  uses_mask = False
 
   def __init__(self, environment, terminal, parent, action):
     super().__init__(environment, terminal, parent, action)
     self.neural_policy = None
 
-  # Sets Node to use pytorch model
-  # closure should take a node as input and return the tensor that should be
-  # fed into the model for this node
   @classmethod
-  def set_model(cls, model, closure):
+  def set_model(cls, model, closure, uses_mask: bool = False):
     if not isinstance(model, torch.nn.Module):
       raise ValueError("Model is not a PyTorch module")
 
     cls.model = model
     cls.build_tensor = closure
+    cls.uses_mask = uses_mask
 
-  def _rollout(self):
+  @classmethod
+  def set_inference_client(cls, client, closure, uses_mask: bool = False):
+    cls.inference_client = client
+    cls.build_tensor = closure
+    cls.uses_mask = uses_mask
+    cls.model = None
+
+  def _evaluate(self):
     if self.environment.is_terminal():
       return -(self.environment.get_winner() * self.environment.current_turn())
 
     node_cls = type(self)
+
+    if node_cls.inference_client is not None:
+      policy, reward = node_cls.inference_client.evaluate_node(
+        self,
+        node_cls.build_tensor,
+        uses_mask=node_cls.uses_mask,
+      )
+      self.neural_policy = policy
+      return -reward
+
     device = next(node_cls.model.parameters()).device
     tensor = node_cls.build_tensor(self).to(device)
-    with torch.no_grad():
+
+    with torch.inference_mode():
       node_cls.model.eval()
       policy_logits, value = node_cls.model(tensor)
-      mask = torch.tensor(self.environment.get_mask(), dtype=policy_logits.dtype, device=policy_logits.device).unsqueeze(0)
-      masked_logits = policy_logits.masked_fill(mask == 0, float('-inf'))
 
-      if mask.sum().item() == 0:
-        masked_policy = mask
+      if node_cls.uses_mask:
+        mask = tensor[:, 1, :]
+        masked_logits = policy_logits.masked_fill(mask == 0, float('-inf'))
+        if mask.sum().item() == 0:
+          masked_policy = mask
+        else:
+          masked_policy = torch.softmax(masked_logits, dim=1)
       else:
-        masked_policy = torch.softmax(masked_logits, dim=1)
+        mask = torch.tensor(
+          self.environment.get_mask(),
+          dtype=policy_logits.dtype,
+          device=policy_logits.device,
+        ).unsqueeze(0)
+        masked_logits = policy_logits.masked_fill(mask == 0, float('-inf'))
+        if mask.sum().item() == 0:
+          masked_policy = mask
+        else:
+          masked_policy = torch.softmax(masked_logits, dim=1)
 
       self.neural_policy = masked_policy.detach().cpu().numpy()[0]
 
     reward = value.detach().cpu().item()
     return -reward
+
+  def _rollout(self):
+    return self._evaluate()
 
   def _ucb(self):
     if self.visit_count == 0:

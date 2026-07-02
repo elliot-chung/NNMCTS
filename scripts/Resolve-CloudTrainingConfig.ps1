@@ -11,6 +11,7 @@ function Resolve-CloudTrainingConfig {
     [int]$MctsIters = 0,
     [string]$Player1Type,
     [string]$Player2Type,
+    [int]$SelfPlayWorkers = 0,
     [int]$MaxRuntimeSeconds = 0,
     [int]$MaxTrainingSeconds = 0,
     [int]$MaxInstanceSeconds = 0
@@ -38,6 +39,7 @@ function Resolve-CloudTrainingConfig {
     MctsIters = if ($MctsIters -gt 0) { $MctsIters } else { [int]$training.mctsIters }
     Player1Type = if ($Player1Type) { $Player1Type } else { $training.player1Type }
     Player2Type = if ($Player2Type) { $Player2Type } else { $training.player2Type }
+    SelfPlayWorkers = if ($SelfPlayWorkers -gt 0) { $SelfPlayWorkers } elseif ($Profile -eq "gpu" -and $training.PSObject.Properties.Name -contains "selfPlayWorkers") { [int]$training.selfPlayWorkers } else { 1 }
     MaxRuntimeSeconds = if ($MaxRuntimeSeconds -gt 0) { $MaxRuntimeSeconds } else { [int]$timeouts.maxRuntimeSeconds }
     MaxTrainingSeconds = if ($MaxTrainingSeconds -gt 0) { $MaxTrainingSeconds } else { [int]$timeouts.maxTrainingSeconds }
     MaxInstanceSeconds = if ($MaxInstanceSeconds -gt 0) { $MaxInstanceSeconds } else { [int]$timeouts.maxInstanceSeconds }
@@ -64,6 +66,7 @@ function New-CodeBuildEnvironmentOverrides {
     MCTS_ITERS = [string]$TrainingConfig.MctsIters
     PLAYER1_TYPE = [string]$TrainingConfig.Player1Type
     PLAYER2_TYPE = [string]$TrainingConfig.Player2Type
+    SELF_PLAY_WORKERS = [string]$TrainingConfig.SelfPlayWorkers
     MAX_RUNTIME_SECONDS = [string]$TrainingConfig.MaxRuntimeSeconds
   }
 
@@ -95,6 +98,7 @@ function New-GpuTrainingTags {
     @{ Key = "nnmcts-mcts-iters"; Value = [string]$TrainingConfig.MctsIters },
     @{ Key = "nnmcts-player1-type"; Value = [string]$TrainingConfig.Player1Type },
     @{ Key = "nnmcts-player2-type"; Value = [string]$TrainingConfig.Player2Type },
+    @{ Key = "nnmcts-self-play-workers"; Value = [string]$TrainingConfig.SelfPlayWorkers },
     @{ Key = "nnmcts-max-training-seconds"; Value = [string]$TrainingConfig.MaxTrainingSeconds },
     @{ Key = "nnmcts-max-instance-seconds"; Value = [string]$TrainingConfig.MaxInstanceSeconds }
   )

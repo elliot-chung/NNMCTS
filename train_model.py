@@ -40,6 +40,7 @@ def build_parser():
   parser.add_argument("--augment-val", action="store_true")
   parser.add_argument("--deduplicate-train", action="store_true")
   parser.add_argument("--deduplicate-val", action="store_true")
+  parser.add_argument("--amp", action="store_true", help="Enable mixed-precision training on CUDA.")
   return parser
 
 
@@ -87,6 +88,7 @@ def run_training(
   augment_val: bool,
   deduplicate_train: bool,
   deduplicate_val: bool,
+  use_amp: bool = False,
 ):
   torch.manual_seed(seed)
 
@@ -109,13 +111,15 @@ def run_training(
     deduplicate_train=deduplicate_train,
     deduplicate_val=deduplicate_val,
   )
-  train_loader, val_loader = create_dataloaders(train_dataset, val_dataset, batch_size)
+  train_loader, val_loader = create_dataloaders(train_dataset, val_dataset, batch_size, device=device)
 
   model, checkpoint_metadata = build_model(game_type, checkpoint_path=checkpoint_path, device=device)
   model.train()
   optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
   criterion_value = nn.MSELoss()
   spec = get_game_spec(game_type)
+  amp_enabled = use_amp and str(device).startswith("cuda")
+  scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 
   history = []
   epoch_iterator = tqdm(range(epochs), desc="Training epochs", unit="epoch")
@@ -125,18 +129,20 @@ def run_training(
 
     for batch in train_loader:
       inputs, policies, rewards = prepare_inputs(spec.game_type, batch)
-      inputs = inputs.to(device)
-      policies = policies.to(device)
-      rewards = rewards.to(device)
+      inputs = inputs.to(device, non_blocking=amp_enabled)
+      policies = policies.to(device, non_blocking=amp_enabled)
+      rewards = rewards.to(device, non_blocking=amp_enabled)
 
-      predicted_policy_logits, predicted_values = model(inputs)
-      policy_loss = soft_cross_entropy(predicted_policy_logits, policies)
-      value_loss = criterion_value(predicted_values.squeeze(-1), rewards)
-      loss = (policy_loss_weight * policy_loss) + (value_loss_weight * value_loss)
+      optimizer.zero_grad(set_to_none=True)
+      with torch.amp.autocast("cuda", enabled=amp_enabled):
+        predicted_policy_logits, predicted_values = model(inputs)
+        policy_loss = soft_cross_entropy(predicted_policy_logits, policies)
+        value_loss = criterion_value(predicted_values.squeeze(-1), rewards)
+        loss = (policy_loss_weight * policy_loss) + (value_loss_weight * value_loss)
 
-      optimizer.zero_grad()
-      loss.backward()
-      optimizer.step()
+      scaler.scale(loss).backward()
+      scaler.step(optimizer)
+      scaler.update()
 
       total_loss += loss.item() * rewards.shape[0]
 
@@ -174,6 +180,7 @@ def run_training(
     "history": history,
     "base_checkpoint": checkpoint_path,
     "loaded_checkpoint_metadata": checkpoint_metadata,
+    "use_amp": amp_enabled,
   }
   save_model_checkpoint(output_model, model, spec.game_type, metadata)
 
@@ -207,6 +214,7 @@ def main():
     augment_val=args.augment_val,
     deduplicate_train=args.deduplicate_train,
     deduplicate_val=args.deduplicate_val,
+    use_amp=args.amp,
   )
 
   print(f"Training dataset size: {result['train_size']}")

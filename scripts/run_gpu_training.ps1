@@ -11,6 +11,7 @@ param(
   [int]$MctsIters = 0,
   [string]$Player1Type,
   [string]$Player2Type,
+  [int]$SelfPlayWorkers = 0,
   [int]$MaxTrainingSeconds = 0,
   [int]$MaxInstanceSeconds = 0
 )
@@ -22,7 +23,7 @@ $Region = $awsConfig.Region
 $StackName = $awsConfig.StackName
 
 . (Join-Path $PSScriptRoot "Resolve-CloudTrainingConfig.ps1")
-$trainingConfig = Resolve-CloudTrainingConfig -Profile gpu -ConfigPath $ConfigPath -GameType $GameType -Rounds $Rounds -GamesPerRound $GamesPerRound -Epochs $Epochs -BatchSize $BatchSize -MctsIters $MctsIters -Player1Type $Player1Type -Player2Type $Player2Type -MaxTrainingSeconds $MaxTrainingSeconds -MaxInstanceSeconds $MaxInstanceSeconds
+$trainingConfig = Resolve-CloudTrainingConfig -Profile gpu -ConfigPath $ConfigPath -GameType $GameType -Rounds $Rounds -GamesPerRound $GamesPerRound -Epochs $Epochs -BatchSize $BatchSize -MctsIters $MctsIters -Player1Type $Player1Type -Player2Type $Player2Type -SelfPlayWorkers $SelfPlayWorkers -MaxTrainingSeconds $MaxTrainingSeconds -MaxInstanceSeconds $MaxInstanceSeconds
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
@@ -71,7 +72,7 @@ Write-Host "Uploading source to s3://$bucket/$sourceKey"
 Invoke-AwsCli @("s3", "cp", $zipPath, "s3://$bucket/$sourceKey")
 
 Write-Host "Launching GPU training instance (max $($trainingConfig.MaxTrainingSeconds)s training / $($trainingConfig.MaxInstanceSeconds)s instance cap)..."
-Write-Host "  gameType=$($trainingConfig.GameType) rounds=$($trainingConfig.Rounds) gamesPerRound=$($trainingConfig.GamesPerRound) epochs=$($trainingConfig.Epochs) batchSize=$($trainingConfig.BatchSize) mctsIters=$($trainingConfig.MctsIters)"
+Write-Host "  gameType=$($trainingConfig.GameType) rounds=$($trainingConfig.Rounds) gamesPerRound=$($trainingConfig.GamesPerRound) epochs=$($trainingConfig.Epochs) batchSize=$($trainingConfig.BatchSize) mctsIters=$($trainingConfig.MctsIters) selfPlayWorkers=$($trainingConfig.SelfPlayWorkers)"
 
 $instanceTags = New-GpuTrainingTags -TrainingConfig $trainingConfig -Bucket $bucket -SourceKey $sourceKey -RunId $runId
 $tagSpecifications = Format-Ec2TagSpecifications -Tags $instanceTags

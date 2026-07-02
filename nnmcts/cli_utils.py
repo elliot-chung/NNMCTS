@@ -126,20 +126,38 @@ def save_model_checkpoint(
 
 
 class ScriptNeuralMCTSPlayer(Player):
-  def __init__(self, environment, is_first, iter_count: int, model: torch.nn.Module, build_tensor, player_name: str):
+  def __init__(
+    self,
+    environment,
+    is_first,
+    iter_count: int,
+    model: torch.nn.Module | None,
+    build_tensor,
+    player_name: str,
+    uses_mask: bool = False,
+    inference_client=None,
+    show_mcts_timing: bool = False,
+  ):
     super().__init__(environment, is_first)
     self.iter_count = iter_count
     self.player_name = player_name
+    self.show_mcts_timing = show_mcts_timing
 
     node_name = f"{player_name}NeuralNode"
     self.node_cls = type(node_name, (NeuralNode,), {})
-    self.node_cls.model = model
     self.node_cls.build_tensor = build_tensor
+    self.node_cls.uses_mask = uses_mask
+    if inference_client is not None:
+      self.node_cls.inference_client = inference_client
+      self.node_cls.model = None
+    else:
+      self.node_cls.model = model
+      self.node_cls.inference_client = None
 
   def on_my_turn(self):
     env_copy = self.environment.copy()
     node = self.node_cls(env_copy, env_copy.is_terminal(), None, None)
-    node, policy = mcts(node, self.iter_count)
+    node, policy = mcts(node, self.iter_count, show_execution_time=self.show_mcts_timing)
     return node.action, policy
 
 
@@ -153,22 +171,36 @@ def create_player(
   device: str,
   player_name: str,
   model_arg_name: str | None = None,
+  inference_client=None,
+  show_mcts_timing: bool = False,
 ) -> Player:
   normalized_type = player_type.lower()
   if normalized_type == "random":
     return Random_Player(environment, is_first)
   if normalized_type == "mcts":
-    return MCTS_Player(environment, is_first, iter_count)
+    return MCTS_Player(environment, is_first, iter_count, show_mcts_timing=show_mcts_timing)
   if normalized_type != "nmcts":
     raise ValueError(f"Unsupported player type: {player_type}")
-  if model_path is None:
+  if model_path is None and inference_client is None:
     required_arg = model_arg_name or f"--{player_name.replace('_', '-')}-model"
     raise ValueError(f"{player_name} requires {required_arg} when using nmcts")
 
   spec = get_game_spec(game_type)
-  model, _ = build_model(game_type, checkpoint_path=model_path, device=device)
-  model.eval()
-  return ScriptNeuralMCTSPlayer(environment, is_first, iter_count, model, spec.build_tensor, player_name)
+  model = None
+  if inference_client is None:
+    model, _ = build_model(game_type, checkpoint_path=model_path, device=device)
+    model.eval()
+  return ScriptNeuralMCTSPlayer(
+    environment,
+    is_first,
+    iter_count,
+    model,
+    spec.build_tensor,
+    player_name,
+    uses_mask=spec.uses_mask,
+    inference_client=inference_client,
+    show_mcts_timing=show_mcts_timing,
+  )
 
 
 def summarize_results(results: dict[int, int], game_count: int) -> dict[str, Any]:
@@ -269,7 +301,12 @@ def build_record_datasets(
   return train_dataset, val_dataset
 
 
-def create_dataloaders(train_dataset, val_dataset, batch_size: int) -> tuple[DataLoader, DataLoader | None]:
+def create_dataloaders(
+  train_dataset,
+  val_dataset,
+  batch_size: int,
+  device: str = "cpu",
+) -> tuple[DataLoader, DataLoader | None]:
   train_size = len(train_dataset)
   if train_size == 0:
     raise ValueError("Training dataset is empty")
@@ -279,16 +316,28 @@ def create_dataloaders(train_dataset, val_dataset, batch_size: int) -> tuple[Dat
       "Increase games-per-round or disable val_split/deduplicate-train."
     )
 
+  use_cuda = str(device).startswith("cuda")
+  loader_kwargs = {
+    "num_workers": 2 if use_cuda else 0,
+    "pin_memory": use_cuda,
+  }
+
   effective_batch = min(batch_size, train_size)
   train_loader = DataLoader(
     train_dataset,
     batch_size=effective_batch,
     shuffle=True,
     drop_last=train_size > effective_batch,
+    **loader_kwargs,
   )
   val_loader = None
   if val_dataset is not None:
-    val_loader = DataLoader(val_dataset, batch_size=min(batch_size, len(val_dataset)), shuffle=False)
+    val_loader = DataLoader(
+      val_dataset,
+      batch_size=min(batch_size, len(val_dataset)),
+      shuffle=False,
+      **loader_kwargs,
+    )
   return train_loader, val_loader
 
 

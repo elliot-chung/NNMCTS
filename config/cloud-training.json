@@ -24,6 +24,7 @@
     "batchSize": 128,
     "mctsIters": 50,
     "player1Type": "nmcts",
-    "player2Type": "nmcts"
+    "player2Type": "nmcts",
+    "selfPlayWorkers": 3
   }
 }
