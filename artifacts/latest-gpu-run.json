@@ -1,11 +1,28 @@
-﻿{
-    "runId":  "gpu-20260630-160901",
-    "instanceId":  "i-0c9283801b9d4467b",
+{
+    "runId":  "gpu-20260701-192839",
+    "instanceId":  "i-03ed2d48183bbc796",
     "bucket":  "nnmcts-artifacts-730335282892-us-west-1",
-    "sourceKey":  "source/nnmcts-gpu-20260630-160901.zip",
-    "manifestKey":  "runs/gpu-20260630-160901/manifest.json",
-    "profile":  "personal",
+    "sourceKey":  "source/nnmcts-gpu-20260701-192839.zip",
+    "manifestKey":  "runs/gpu-20260701-192839/manifest.json",
+    "profile":  "default",
     "region":  "us-west-1",
     "stackName":  "NnmctsPipelineStack",
-    "launchedAt":  "2026-06-30T16:09:01.9819167-07:00"
+    "launchedAt":  "2026-07-01T19:28:39.5958441-07:00",
+    "trainingConfig":  {
+                           "GameType":  "UTTT",
+                           "Rounds":  20,
+                           "GamesPerRound":  20,
+                           "Epochs":  20,
+                           "BatchSize":  128,
+                           "MctsIters":  50,
+                           "Player1Type":  "nmcts",
+                           "Player2Type":  "nmcts",
+                           "MaxRuntimeSeconds":  3600,
+                           "MaxTrainingSeconds":  90000,
+                           "MaxInstanceSeconds":  90000,
+                           "CodeBuildTimeoutMinutes":  60,
+                           "CodeBuildQueuedTimeoutMinutes":  30,
+                           "ConfigPath":  "C:\\Users\\ec201\\OneDrive\\Desktop\\NNMCTS\\config\\cloud-training.json",
+                           "Profile":  "gpu"
+                       }
 }
