@@ -3,7 +3,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from nnmcts.cli_utils import load_records_file, save_records_file
+from nnmcts.cli_utils import load_records_file, save_records_file, default_device
 from play_matches import run_matches
 from train_model import run_training
 
@@ -13,38 +13,38 @@ def build_parser():
     description="Alternate between match generation and model training.",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
   )
-  parser.add_argument("--game-type", choices=("TTT", "UTTT"), required=True)
-  parser.add_argument("--rounds", type=int, required=True)
-  parser.add_argument("--games-per-round", type=int, required=True)
-  parser.add_argument("--output-dir", required=True)
-  parser.add_argument("--device", default="cpu")
+  parser.add_argument("--game-type", choices=("TTT", "UTTT"), required=True, help="Type of game to play.")
+  parser.add_argument("--rounds", type=int, required=True, help="Number of rounds to run the pipeline.")
+  parser.add_argument("--games-per-round", type=int, required=True, help="Number of games to play in each round.")
+  parser.add_argument("--output-dir", required=True, help="Directory to save the output.")
+  parser.add_argument("--device", choices=("cpu", "cuda"), default=default_device(), help="Device to use for training and inference.")
   parser.add_argument("--initial-checkpoint", help="Optional starting checkpoint for training and NMCTS players.")
-  parser.add_argument("--accumulate-records", action="store_true")
+  parser.add_argument("--accumulate-records", action="store_true", help="Accumulate records from each round into a single dataset.")
 
   for player_idx in (1, 2):
-    parser.add_argument(f"--player{player_idx}-type", choices=("random", "mcts", "nmcts"), required=True)
-    parser.add_argument(f"--player{player_idx}-iters", type=int, default=100)
+    parser.add_argument(f"--player{player_idx}-type", choices=("random", "mcts", "nmcts"), required=True, help="Type of player to use.")
+    parser.add_argument(f"--player{player_idx}-iters", type=int, default=100, help="Number of iterations for the player. (Does nothing for random players.)")
     parser.add_argument(
       f"--player{player_idx}-model",
       help="Optional fixed checkpoint for this player. If omitted for NMCTS, the latest trained checkpoint is used.",
     )
 
-  parser.add_argument("--epochs", type=int, default=100)
-  parser.add_argument("--batch-size", type=int, default=64)
-  parser.add_argument("--learning-rate", type=float, default=1e-3)
-  parser.add_argument("--weight-decay", type=float, default=0.0)
-  parser.add_argument("--value-loss-weight", type=float, default=0.1)
-  parser.add_argument("--policy-loss-weight", type=float, default=0.9)
-  parser.add_argument("--val-split", type=float, default=0.2)
-  parser.add_argument("--seed", type=int, default=0)
-  parser.add_argument("--log-every", type=int, default=10)
-  parser.add_argument("--augment-train", action="store_true")
-  parser.add_argument("--augment-val", action="store_true")
-  parser.add_argument("--deduplicate-train", action="store_true")
-  parser.add_argument("--deduplicate-val", action="store_true")
+  parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs.")
+  parser.add_argument("--batch-size", type=int, default=64, help="Batch size for training.")
+  parser.add_argument("--learning-rate", type=float, default=1e-3, help="Learning rate for training.")
+  parser.add_argument("--weight-decay", type=float, default=0.0, help="Weight decay for training.")
+  parser.add_argument("--value-loss-weight", type=float, default=0.1, help="Weight for value loss in training.")
+  parser.add_argument("--policy-loss-weight", type=float, default=0.9, help="Weight for policy loss in training.")
+  parser.add_argument("--val-split", type=float, default=0.2, help="Validation split for training.")
+  parser.add_argument("--seed", type=int, default=0, help="Random seed for training.")
+  parser.add_argument("--log-every", type=int, default=10, help="Log every n epochs.")
+  parser.add_argument("--augment-train", action="store_true", help="Augment training dataset.")
+  parser.add_argument("--augment-val", action="store_true", help="Augment validation dataset.")
+  parser.add_argument("--deduplicate-train", action="store_true", help="Deduplicate training dataset.")
+  parser.add_argument("--deduplicate-val", action="store_true", help="Deduplicate validation dataset.")
   parser.add_argument("--self-play-workers", type=int, default=1, help="Parallel self-play worker processes.")
-  parser.add_argument("--batched-inference", action="store_true")
-  parser.add_argument("--show-mcts-timing", action="store_true")
+  parser.add_argument("--batched-inference", action="store_true", help="Use a shared GPU inference server for NMCTS (auto-enabled for workers>1 with NMCTS on cuda).")
+  parser.add_argument("--show-mcts-timing", action="store_true", help="Print MCTS phase breakdown per move.")
   parser.add_argument("--amp", action="store_true", help="Enable mixed-precision training on CUDA.")
   return parser
 

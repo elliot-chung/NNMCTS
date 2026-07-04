@@ -11,6 +11,7 @@ from nnmcts.cli_utils import (
   create_environment,
   create_player,
   format_ratio,
+  default_device,
   save_records_file,
   summarize_results,
 )
@@ -23,9 +24,9 @@ def build_parser():
     description="Pit two players against each other and optionally record the resulting dataset.",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
   )
-  parser.add_argument("--game-type", choices=("TTT", "UTTT"), required=True)
-  parser.add_argument("--num-games", type=int, required=True)
-  parser.add_argument("--device", default="cpu")
+  parser.add_argument("--game-type", choices=("TTT", "UTTT"), required=True, help="Type of game to play.")
+  parser.add_argument("--num-games", type=int, required=True, help="Number of games to play.")
+  parser.add_argument("--device", choices=("cpu", "cuda"), default=default_device(), help="Device to use for training and inference.")
   parser.add_argument("--workers", type=int, default=1, help="Parallel self-play worker processes.")
   parser.add_argument("--record-output", help="Optional path to save recorded game data.")
   parser.add_argument("--show-mcts-timing", action="store_true", help="Print MCTS phase breakdown per move.")
@@ -34,12 +35,12 @@ def build_parser():
     action="store_true",
     help="Use a shared GPU inference server for NMCTS (auto-enabled for workers>1 with NMCTS on cuda).",
   )
-  parser.add_argument("--inference-batch-size", type=int, default=32)
-  parser.add_argument("--inference-max-wait-ms", type=float, default=5.0)
+  parser.add_argument("--inference-batch-size", type=int, default=32, help="Batch size for inference.")
+  parser.add_argument("--inference-max-wait-ms", type=float, default=5.0, help="Maximum wait time for inference.")
 
   for player_idx in (1, 2):
-    parser.add_argument(f"--player{player_idx}-type", choices=("random", "mcts", "nmcts"), required=True)
-    parser.add_argument(f"--player{player_idx}-iters", type=int, default=100)
+    parser.add_argument(f"--player{player_idx}-type", choices=("random", "mcts", "nmcts"), required=True, help="Type of player to use.")
+    parser.add_argument(f"--player{player_idx}-iters", type=int, default=100, help="Number of iterations for the player. (Does nothing for random players.)")
     parser.add_argument(f"--player{player_idx}-model", help="Checkpoint path for NMCTS players.")
 
   return parser
@@ -266,7 +267,6 @@ def run_matches(
       ctx = mp.get_context("spawn")
       executor_kwargs = {"mp_context": ctx} if workers > 1 else {}
 
-      inference_client = inference_server.create_client() if use_inference_server and workers == 1 else None
       if workers == 1 and use_inference_server:
         match_iterator = tqdm(range(num_games), desc="Playing matches", unit="game", ascii=True)
         for _ in match_iterator:
@@ -281,7 +281,7 @@ def run_matches(
             device=worker_device,
             record_output=record_games,
             show_mcts_timing=show_mcts_timing,
-            inference_client=inference_client,
+            inference_client=inference_server.create_client(),
           )
           results[game_result["winner"]] += 1
           if game_result["record"] is not None:
