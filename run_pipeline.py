@@ -71,7 +71,7 @@ def main():
   latest_checkpoint = args.initial_checkpoint
   cumulative_records = []
 
-  round_iterator = tqdm(range(1, args.rounds + 1), desc="Pipeline rounds", unit="round")
+  round_iterator = tqdm(range(1, args.rounds + 1), desc="Pipeline rounds", unit="round", ascii=True)
   for round_idx in round_iterator:
     round_dataset_path = datasets_dir / f"round_{round_idx:03d}.pkl"
 

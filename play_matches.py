@@ -212,7 +212,7 @@ def run_matches(
     if workers == 1 and not use_inference_server:
       player_one = None
       player_two = None
-      match_iterator = tqdm(range(num_games), desc="Playing matches", unit="game")
+      match_iterator = tqdm(range(num_games), desc="Playing matches", unit="game", ascii=True)
       for _ in match_iterator:
         environment = create_environment(game_type)
         if player_one is None:
@@ -268,7 +268,7 @@ def run_matches(
 
       inference_client = inference_server.create_client() if use_inference_server and workers == 1 else None
       if workers == 1 and use_inference_server:
-        match_iterator = tqdm(range(num_games), desc="Playing matches", unit="game")
+        match_iterator = tqdm(range(num_games), desc="Playing matches", unit="game", ascii=True)
         for _ in match_iterator:
           game_result = _play_game_sequential(
             game_type=game_type,
@@ -319,7 +319,7 @@ def run_matches(
 
         with ProcessPoolExecutor(max_workers=workers, **executor_kwargs) as executor:
           futures = [executor.submit(play_game_worker, args) for args in worker_args]
-          match_iterator = tqdm(as_completed(futures), total=num_games, desc="Playing matches", unit="game")
+          match_iterator = tqdm(as_completed(futures), total=num_games, desc="Playing matches", unit="game", ascii=True)
           for future in match_iterator:
             game_result = future.result()
             results[game_result["winner"]] += 1

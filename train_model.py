@@ -122,7 +122,7 @@ def run_training(
   scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 
   history = []
-  epoch_iterator = tqdm(range(epochs), desc="Training epochs", unit="epoch")
+  epoch_iterator = tqdm(range(epochs), desc="Training epochs", unit="epoch", ascii=True)
   for epoch in epoch_iterator:
     model.train()
     total_loss = 0.0
