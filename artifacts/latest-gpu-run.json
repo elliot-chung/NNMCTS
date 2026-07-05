@@ -1,9 +1,9 @@
 {
-    "runId":  "gpu-resume-20260704-204436",
-    "instanceId":  "i-0c7bb30e070ddbd4e",
+    "runId":  "gpu-resume-20260705-000913",
+    "instanceId":  "i-067d4722396060619",
     "bucket":  "nnmcts-artifacts-730335282892-us-west-1",
-    "sourceKey":  "source/nnmcts-gpu-resume-20260704-204436.zip",
-    "manifestKey":  "runs/gpu-resume-20260704-204436/manifest.json",
+    "sourceKey":  "source/nnmcts-gpu-resume-20260705-000913.zip",
+    "manifestKey":  "runs/gpu-resume-20260705-000913/manifest.json",
     "profile":  "default",
     "region":  "us-west-1",
     "stackName":  "NnmctsPipelineStack",
@@ -11,7 +11,7 @@
     "trainingProfile":  "gpu",
     "runType":  "training",
     "smokeThenTrain":  false,
-    "launchedAt":  "2026-07-04T20:44:36.0418263-07:00",
+    "launchedAt":  "2026-07-05T00:09:13.1207854-07:00",
     "trainingConfig":  {
                            "GameType":  "UTTT",
                            "Rounds":  50,
