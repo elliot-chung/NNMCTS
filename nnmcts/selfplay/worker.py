@@ -43,11 +43,17 @@ def play_game_worker(args: dict[str, Any]) -> dict[str, Any]:
 
   arena = Arena(environment, player_one, player_two)
   mcts_timing = None
+  progress_queue = args.get("progress_queue")
+  game_index = args.get("game_index")
+
+  def on_turn(turn: int) -> None:
+    if progress_queue is not None:
+      progress_queue.put((game_index, turn))
 
   if record:
-    winner, game_record = arena.play_game(record=True)
+    winner, game_record = arena.play_game(record=True, on_turn=on_turn)
   else:
-    winner = arena.play_game(record=False)
+    winner = arena.play_game(record=False, on_turn=on_turn)
     game_record = None
 
   wall_time = perf_counter() - start

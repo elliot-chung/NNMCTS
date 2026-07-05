@@ -1,7 +1,8 @@
 import argparse
 import multiprocessing as mp
 from collections import Counter
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from queue import Empty
 from time import perf_counter
 
 from tqdm import tqdm
@@ -16,6 +17,48 @@ from nnmcts.cli_utils import (
   summarize_results,
 )
 from nnmcts.selfplay.worker import play_game_worker
+
+MAX_GAME_TURNS = {"TTT": 9, "UTTT": 81}
+
+
+def max_game_turns(game_type: str) -> int:
+  return MAX_GAME_TURNS[game_type]
+
+
+def fractional_games_complete(completed: int, turn_progress: dict[int, int], max_turns: int) -> float:
+  partial = sum(turn / max_turns for turn in turn_progress.values())
+  return completed + partial
+
+
+def refresh_match_progress(
+  progress_bar,
+  completed: int,
+  turn_progress: dict[int, int],
+  max_turns: int,
+  num_games: int,
+  results: Counter,
+) -> None:
+  new_progress = min(fractional_games_complete(completed, turn_progress, max_turns), num_games)
+  if new_progress != progress_bar.n:
+    progress_bar.n = new_progress
+    progress_bar.refresh()
+  finished = sum(results.values())
+  if finished:
+    summary = summarize_results(results, finished)
+    progress_bar.set_postfix({
+      "p1": summary["player_one_wins"],
+      "draw": summary["draws"],
+      "p2": summary["player_two_wins"],
+    })
+
+
+def drain_turn_progress(progress_queue, turn_progress: dict[int, int]) -> None:
+  while True:
+    try:
+      game_index, turn = progress_queue.get_nowait()
+    except Empty:
+      break
+    turn_progress[game_index] = turn
 
 
 def build_parser():
@@ -52,6 +95,7 @@ def _build_worker_args(
   record: bool,
   show_mcts_timing: bool,
   collect_mcts_timing: bool,
+  progress_queue=None,
 ) -> dict:
   return {
     "game_index": game_index,
@@ -66,6 +110,7 @@ def _build_worker_args(
     "record": record,
     "show_mcts_timing": show_mcts_timing,
     "collect_mcts_timing": collect_mcts_timing,
+    "progress_queue": progress_queue,
   }
 
 
@@ -146,6 +191,11 @@ def run_matches(
         "p2": summary["player_two_wins"],
       })
   else:
+    max_turns = max_game_turns(game_type)
+    ctx = mp.get_context("spawn")
+    manager = ctx.Manager()
+    progress_queue = manager.Queue()
+
     worker_args = [
       _build_worker_args(
         game_index=index,
@@ -160,30 +210,63 @@ def run_matches(
         record=record_games,
         show_mcts_timing=show_mcts_timing,
         collect_mcts_timing=collect_benchmark,
+        progress_queue=progress_queue,
       )
       for index in range(num_games)
     ]
 
-    ctx = mp.get_context("spawn")
-    with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as executor:
-      futures = [executor.submit(play_game_worker, args) for args in worker_args]
-      match_iterator = tqdm(as_completed(futures), total=num_games, desc="Playing matches", unit="game", ascii=True)
-      for future in match_iterator:
-        game_result = future.result()
-        results[game_result["winner"]] += 1
-        if game_result["record"] is not None:
-          records.append(game_result["record"])
-        if collect_benchmark:
-          game_timings.append(game_result["wall_time"])
-          if game_result.get("mcts_timing"):
-            mcts_timings.append(game_result["mcts_timing"])
+    turn_progress: dict[int, int] = {}
+    completed_games = 0
+    match_iterator = tqdm(
+      total=num_games,
+      desc="Playing matches",
+      unit="game",
+      ascii=True,
+      bar_format="{desc}: {percentage:3.0f}%|{bar}| {n:.1f}/{total} [{elapsed}<{remaining}, {rate_fmt}{postfix}]",
+    )
 
-        summary = summarize_results(results, sum(results.values()))
-        match_iterator.set_postfix({
-          "p1": summary["player_one_wins"],
-          "draw": summary["draws"],
-          "p2": summary["player_two_wins"],
-        })
+    with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as executor:
+      future_to_game_index = {
+        executor.submit(play_game_worker, args): args["game_index"]
+        for args in worker_args
+      }
+      pending = set(future_to_game_index)
+
+      while pending:
+        drain_turn_progress(progress_queue, turn_progress)
+        refresh_match_progress(
+          match_iterator,
+          completed_games,
+          turn_progress,
+          max_turns,
+          num_games,
+          results,
+        )
+
+        done, pending = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
+        for future in done:
+          game_index = future_to_game_index[future]
+          game_result = future.result()
+          turn_progress.pop(game_index, None)
+          completed_games += 1
+          results[game_result["winner"]] += 1
+          if game_result["record"] is not None:
+            records.append(game_result["record"])
+          if collect_benchmark:
+            game_timings.append(game_result["wall_time"])
+            if game_result.get("mcts_timing"):
+              mcts_timings.append(game_result["mcts_timing"])
+
+      drain_turn_progress(progress_queue, turn_progress)
+      refresh_match_progress(
+        match_iterator,
+        completed_games,
+        turn_progress,
+        max_turns,
+        num_games,
+        results,
+      )
+      match_iterator.close()
 
   summary = summarize_results(results, num_games)
   if record_output:
