@@ -277,8 +277,9 @@ Alternatively, set `AWS_PROFILE` and `AWS_REGION` in your environment instead of
 
 ### Cloud training configuration (`config/cloud-training.json`)
 
-This file is the default source for training hyperparameters and timeouts used by the cloud scripts and CDK stack. It has three top-level sections:
+This file is the default source for training hyperparameters, GPU AMI IDs, and timeouts used by the cloud scripts and CDK stack. It has these top-level sections:
 
+- **`gpuAmiIds`** — optional per-region EC2 AMI IDs for GPU training instances (falls back to the base DLAMI when unset)
 - **`gpuSmoke`** — defaults for the minimal GPU smoke test (`run_cloud_pipeline.ps1 -SmokeOnly` or the first step of a full run)
 - **`gpu`** — defaults for full GPU EC2 training (`run_gpu_training.ps1` or the second step of a full run)
 - **`timeouts`** — wall-clock limits for GPU instances
@@ -375,7 +376,7 @@ npx cdk deploy NnmctsPipelineStack --require-approval never
 
 ### 3. Run the cloud pipeline
 
-Packages source, uploads to S3, runs a minimal GPU smoke test on UTTT, then launches full GPU training if the smoke test succeeds:
+Packages source (GPU bundles exclude `demo/` and `artifacts/`), uploads to S3, runs a minimal GPU smoke test on UTTT, then launches full GPU training if the smoke test succeeds:
 
 ```powershell
 .\scripts\run_cloud_pipeline.ps1
@@ -416,7 +417,27 @@ Training limits and GPU defaults come from `config/cloud-training.json`. Per-run
 
 The instance always shuts down when the script exits. Live logs stream to CloudWatch log group `/nnmcts/gpu-training` (one stream per instance ID); `.\scripts\check_gpu_training.ps1` fetches recent events from there. A full log archive is also uploaded to `s3://<bucket>/runs/<run-id>/gpu-train.log` when the run completes.
 
-### 5. Tear down
+### 5. Custom GPU AMI (optional, faster cold start)
+
+GPU instances bootstrap faster when dependencies are pre-baked into a custom AMI. The shared installer is `cloud/install-gpu-deps.sh`; runtime training still uses `cloud/gpu-train.sh`, which defers CloudWatch agent setup to a background task and skips redundant installs when `/opt/nnmcts/.gpu-deps-ready` exists.
+
+Build a custom AMI once (or after PyTorch / pip dependency changes):
+
+```powershell
+.\scripts\build_gpu_ami.ps1
+```
+
+Then update `gpuAmiIds` in `config/cloud-training.json` with the printed AMI ID and redeploy:
+
+```powershell
+.\scripts\run_cloud_pipeline.ps1 -DeployOnly
+```
+
+Subsequent training launches (`run_gpu_training.ps1`, `run_cloud_pipeline.ps1 -RunOnly`) do not require redeploy unless the AMI ID or CDK stack changes.
+
+**When to rebuild:** changes to `cloud/install-gpu-deps.sh`, PyTorch/CUDA requirements, or numpy/tqdm versions. Hyperparameter and timeout edits in `cloud-training.json` do not require an AMI rebuild.
+
+### 6. Tear down
 
 Stop instances, destroy the CloudFormation stack, and optionally delete the artifacts bucket:
 
@@ -436,7 +457,8 @@ This does not remove the CDK bootstrap stack (`CDKToolkit`).
 ### Region notes
 
 - GPU training uses EC2 `g4dn.xlarge` instances.
-- The GPU AMI in the CDK stack is pinned for `us-west-1`. For other regions, update the AMI lookup in `infra/lib/nnmcts-pipeline-stack.ts`.
+- The GPU AMI is configured per region in `config/cloud-training.json` under `gpuAmiIds`. The CDK stack reads this at deploy time. The default is the AWS Deep Learning AMI PyTorch base image for `us-west-1`.
+- To speed up cold start, bake a custom AMI once with `.\scripts\build_gpu_ami.ps1`, paste the new AMI ID into `gpuAmiIds`, and redeploy: `.\scripts\run_cloud_pipeline.ps1 -DeployOnly`. Rebuild when PyTorch or `cloud/install-gpu-deps.sh` change. Later training runs can use `-RunOnly` without redeploying.
 
 ## Publishing / hygiene
 

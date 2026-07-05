@@ -8,8 +8,8 @@ For local training without AWS, use the top-level entry points (`run_pipeline.py
 
 | Category | Scripts | Purpose |
 |----------|---------|---------|
-| AWS cloud pipeline | `run_cloud_pipeline.ps1`, `run_gpu_training.ps1`, `check_gpu_training.ps1`, `teardown_cloud_pipeline.ps1` | Deploy infrastructure, launch GPU training on EC2, resume from a local checkpoint (`-InitialCheckpointPath`), monitor runs, tear down |
-| Source packaging | `package_source.ps1`, `package_source.py` | Zip the repo (excluding checkpoints, `node_modules`, etc.) for S3 upload |
+| AWS cloud pipeline | `run_cloud_pipeline.ps1`, `run_gpu_training.ps1`, `build_gpu_ami.ps1`, `check_gpu_training.ps1`, `teardown_cloud_pipeline.ps1` | Deploy infrastructure, bake a custom GPU AMI (optional), launch GPU training on EC2, resume from a local checkpoint (`-InitialCheckpointPath`), monitor runs, tear down |
+| Source packaging | `package_source.ps1`, `package_source.py` | Zip the repo (excluding checkpoints, `node_modules`, etc.) for S3 upload; GPU bundles exclude `demo/` and `artifacts/` |
 | Model → demo | `download_checkpoint.ps1`, `export_onnx.py`, `validate_onnx.py` | Pull a trained checkpoint, export ONNX for the browser demo, validate parity |
 | Development | `benchmark_selfplay.py` | Measure self-play throughput and MCTS timing |
 | Publishing | `check_public_safety.ps1` | Scan the repo for account IDs, emails, or local paths before making it public |
@@ -238,6 +238,28 @@ Resume runs use run ID prefix `gpu-resume-`. When `-InitialCheckpointPath` is se
 
 ---
 
+### `build_gpu_ami.ps1`
+
+One-time (or infrequent) builder for a custom GPU AMI that pre-installs CloudWatch agent, `unzip`, DLAMI PyTorch (or pip torch fallback), `numpy`, and `tqdm`. Baked deps are detected at runtime via `/opt/nnmcts/.gpu-deps-ready`, so training cold start skips most `dnf`/`pip` work.
+
+**When to use:** After changing `requirements.txt`, `cloud/install-gpu-deps.sh`, or when you want faster EC2 bootstrap. Rebuild when those dependencies change; subsequent training runs use `-RunOnly` and do not need a CDK redeploy unless you update the AMI ID in config.
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Profile`, `-Region`, `-StackName` | AWS config overrides (same resolution as other scripts) |
+| `-BaseAmiId` | Source DLAMI to bake from (default: region base map, `ami-0b2f6fd4ed32fc52d` in `us-west-1`) |
+| `-InstanceType` | Builder instance type (default `g4dn.xlarge`) |
+
+**Example:**
+
+```powershell
+.\scripts\build_gpu_ami.ps1
+```
+
+The script launches a temporary builder instance (user-data embeds `cloud/install-gpu-deps.sh`), waits for it to stop, creates an AMI, terminates the builder, and prints instructions to paste the new AMI ID into `config/cloud-training.json` and redeploy with `.\scripts\run_cloud_pipeline.ps1 -DeployOnly`.
+
+---
+
 ### `check_gpu_training.ps1`
 
 Shows status for the latest GPU run: instance state, S3 manifest, checkpoint listing, and recent CloudWatch log events.
@@ -281,7 +303,7 @@ Terminates tagged GPU training instances, destroys the CloudFormation stack via 
 
 ### `package_source.ps1` / `package_source.py`
 
-Creates a zip of the repository for upload to S3, excluding `.git`, virtualenvs, `node_modules`, `cdk.out`, checkpoints (`.pt`, `.pkl`), and similar paths. Optionally bundles one checkpoint file at `bundled-checkpoint/<filename>` inside the archive.
+Creates a zip of the repository for upload to S3, excluding `.git`, virtualenvs, `node_modules`, `cdk.out`, checkpoints (`.pt`, `.pkl`), `demo/`, `artifacts/`, and similar paths. Optionally bundles one checkpoint file at `bundled-checkpoint/<filename>` inside the archive.
 
 **When to use:** Rarely invoked directly; `run_gpu_training.ps1` calls `package_source.ps1` automatically (with `-CheckpointPath` when resuming). Useful for debugging packaging or manual uploads.
 
@@ -454,7 +476,7 @@ Exit code `0` = clean, `1` = potential issues listed to stdout.
 | `Stack 'NnmctsPipelineStack' was not found` | Infrastructure not deployed | `.\scripts\run_cloud_pipeline.ps1 -DeployOnly` |
 | `CDK deploy failed` | npm/CDK or IAM issues | Check `infra/` logs; ensure `CDK_DEFAULT_ACCOUNT` resolves via `aws sts get-caller-identity` |
 | Instance ends without manifest | Bootstrap or training error | `.\scripts\check_gpu_training.ps1 -LogLines 200`; check `s3://<bucket>/runs/<run-id>/gpu-train.log` |
-| GPU launch fails | Quota or wrong region | Request **Running On-Demand G and VT instances** quota; GPU AMI is pinned for `us-west-1` in CDK (see main README) |
+| GPU launch fails | Quota or wrong region | Request **Running On-Demand G and VT instances** quota; set `gpuAmiIds` in `config/cloud-training.json` for your region (see main README) |
 | Wrong AWS account/region | Config mismatch | Verify `config/local.json`, `$env:AWS_PROFILE`, `$env:AWS_REGION` |
 | `Initial checkpoint not found` on launch | Bad `-InitialCheckpointPath` | Use a local path to an existing `.pt` file; download first with `download_checkpoint.ps1` if needed |
 | Resume run overwrites low round numbers | Expected without `-StartRound` | Pass `-StartRound` explicitly, or name checkpoint `round_NNN.pt` so the next round is inferred |
