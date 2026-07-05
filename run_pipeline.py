@@ -101,6 +101,7 @@ def main():
   start_round = resolve_start_round(args)
   round_numbers = range(start_round, start_round + args.rounds)
 
+  previous_avg_game_length = None
   round_iterator = tqdm(round_numbers, desc="Pipeline rounds", unit="round", ascii=True)
   for offset, round_idx in enumerate(round_iterator):
     round_dataset_path = datasets_dir / f"round_{round_idx:03d}.pkl"
@@ -121,7 +122,7 @@ def main():
           "Later rounds will use the newly trained model."
         )
 
-    run_matches(
+    match_summary = run_matches(
       game_type=args.game_type,
       num_games=args.games_per_round,
       player_one_type=player_one_type,
@@ -134,7 +135,9 @@ def main():
       record_output=str(round_dataset_path),
       workers=args.self_play_workers,
       show_mcts_timing=args.show_mcts_timing,
+      previous_avg_game_length=previous_avg_game_length,
     )
+    previous_avg_game_length = match_summary.get("avg_game_length")
 
     training_dataset_path = round_dataset_path
     if args.accumulate_records:
