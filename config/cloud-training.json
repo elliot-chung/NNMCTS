@@ -30,7 +30,7 @@
     "mctsIters": 100,
     "player1Type": "nmcts",
     "player2Type": "nmcts",
-    "selfPlayWorkers": 4,
+    "selfPlayWorkers": 3,
     "playDevice": "cpu",
     "trainDevice": "cuda"
   }
