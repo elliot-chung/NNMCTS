@@ -11,6 +11,11 @@ EXCLUDE_DIR_NAMES = {
   "cdk.out",
   "dist",
   "smoke_local",
+  "demo",
+  "artifacts",
+  ".next",
+  ".cursor",
+  "infra",
 }
 
 EXCLUDE_EXTENSIONS = {".pkl", ".pt"}
