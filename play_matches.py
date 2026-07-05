@@ -102,12 +102,22 @@ def refresh_match_progress(
     })
 
 
-def drain_turn_progress(progress_queue, turn_progress: dict[int, int]) -> None:
+def drain_turn_progress(
+  progress_queue,
+  turn_progress: dict[int, int],
+  pending_game_indices: set[int],
+) -> None:
+  for game_index in list(turn_progress):
+    if game_index not in pending_game_indices:
+      del turn_progress[game_index]
+
   while True:
     try:
       game_index, turn = progress_queue.get_nowait()
     except Empty:
       break
+    if game_index not in pending_game_indices:
+      continue
     turn_progress[game_index] = turn
 
 
@@ -299,7 +309,8 @@ def run_matches(
       pending = set(future_to_game_index)
 
       while pending:
-        drain_turn_progress(progress_queue, turn_progress)
+        pending_game_indices = {future_to_game_index[future] for future in pending}
+        drain_turn_progress(progress_queue, turn_progress, pending_game_indices)
         refresh_match_progress(
           match_iterator,
           completed_games,
@@ -326,7 +337,7 @@ def run_matches(
             if game_result.get("mcts_timing"):
               mcts_timings.append(game_result["mcts_timing"])
 
-      drain_turn_progress(progress_queue, turn_progress)
+      drain_turn_progress(progress_queue, turn_progress, set())
       refresh_match_progress(
         match_iterator,
         completed_games,
