@@ -19,7 +19,7 @@ def build_parser():
   parser.add_argument("--games-per-round", type=int, required=True, help="Number of games to play in each round.")
   parser.add_argument("--output-dir", required=True, help="Directory to save the output.")
   parser.add_argument("--device", choices=("cpu", "cuda"), default=default_device(), help="Default device when --play-device or --train-device are omitted.")
-  parser.add_argument("--play-device", choices=("cpu", "cuda"), help="Device for self-play workers and MCTS. Defaults to cpu when --train-device is cuda, otherwise --device.")
+  parser.add_argument("--play-device", choices=("cpu", "cuda"), help="Device for self-play, including NMCTS inference. Defaults to cpu when --train-device is cuda, otherwise --device.")
   parser.add_argument("--train-device", choices=("cpu", "cuda"), help="Device for model training. Defaults to --device.")
   parser.add_argument("--initial-checkpoint", help="Optional starting checkpoint for training and NMCTS players.")
   parser.add_argument(
@@ -54,14 +54,14 @@ def build_parser():
   parser.add_argument(
     "--batched-inference",
     action="store_true",
-    help="Use a shared GPU inference server for NMCTS (auto-enabled when play and train devices differ with NMCTS).",
+    help="Use a shared CUDA inference server for NMCTS during self-play (only when --play-device is cuda).",
   )
   parser.add_argument("--show-mcts-timing", action="store_true", help="Print MCTS phase breakdown per move.")
   parser.add_argument("--amp", action="store_true", help="Enable mixed-precision training on CUDA.")
   return parser
 
 
-def resolve_devices(args) -> tuple[str, str, str]:
+def resolve_devices(args) -> tuple[str, str]:
   train_device = args.train_device if args.train_device is not None else args.device
   if args.play_device is not None:
     play_device = args.play_device
@@ -69,19 +69,7 @@ def resolve_devices(args) -> tuple[str, str, str]:
     play_device = "cpu"
   else:
     play_device = args.device
-  inference_device = train_device if play_device != train_device else play_device
-  return play_device, inference_device, train_device
-
-
-def should_auto_batched_inference(
-  play_device: str,
-  train_device: str,
-  player_one_type: str,
-  player_two_type: str,
-) -> bool:
-  if play_device == train_device or not train_device.startswith("cuda"):
-    return False
-  return player_one_type == "nmcts" or player_two_type == "nmcts"
+  return play_device, train_device
 
 
 def resolve_start_round(args) -> int:
@@ -115,7 +103,7 @@ def main():
 
   latest_checkpoint = args.initial_checkpoint
   cumulative_records = []
-  play_device, inference_device, train_device = resolve_devices(args)
+  play_device, train_device = resolve_devices(args)
   start_round = resolve_start_round(args)
   round_numbers = range(start_round, start_round + args.rounds)
 
@@ -139,13 +127,6 @@ def main():
           "Later rounds will use the newly trained model."
         )
 
-    batched_inference = args.batched_inference or should_auto_batched_inference(
-      play_device,
-      train_device,
-      player_one_type,
-      player_two_type,
-    )
-
     summary = run_matches(
       game_type=args.game_type,
       num_games=args.games_per_round,
@@ -156,11 +137,10 @@ def main():
       player_two_iters=args.player2_iters,
       player_two_model=player_two_model,
       play_device=play_device,
-      inference_device=inference_device,
       record_output=str(round_dataset_path),
       workers=args.self_play_workers,
       show_mcts_timing=args.show_mcts_timing,
-      batched_inference=batched_inference,
+      batched_inference=args.batched_inference,
     )
 
     training_dataset_path = round_dataset_path

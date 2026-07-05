@@ -234,7 +234,6 @@ run_training_phase() {
     --epochs "${epochs}"
     --batch-size "${batch_size}"
     --self-play-workers "${self_play_workers}"
-    --batched-inference
     --amp
     --augment-train
     --deduplicate-train

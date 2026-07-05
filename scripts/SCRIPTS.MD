@@ -49,7 +49,7 @@ Copy-Item config\local.example.json config\local.json
 
 `config/local.json` is gitignored. Alternatively set `AWS_PROFILE` and `AWS_REGION` in your environment. Resolution order: script `-Profile`/`-Region` flags → environment variables → `config/local.json` → defaults (`default`, `us-west-1`, `NnmctsPipelineStack`).
 
-Training hyperparameters and timeouts live in [`config/cloud-training.json`](../config/cloud-training.json). See the main README for field descriptions and per-run override flags. Cloud GPU runs default to **CPU self-play** (`playDevice`) and **GPU training/inference** (`trainDevice`); batched inference is enabled automatically when those differ and NMCTS players are used.
+Training hyperparameters and timeouts live in [`config/cloud-training.json`](../config/cloud-training.json). See the main README for field descriptions and per-run override flags. Cloud GPU runs default to **CPU self-play** (`playDevice`), including NMCTS inference, and **GPU training** (`trainDevice`).
 
 ### Demo app (after exporting ONNX)
 

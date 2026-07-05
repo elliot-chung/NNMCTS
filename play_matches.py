@@ -27,15 +27,15 @@ def build_parser():
   parser.add_argument("--game-type", choices=("TTT", "UTTT"), required=True, help="Type of game to play.")
   parser.add_argument("--num-games", type=int, required=True, help="Number of games to play.")
   parser.add_argument("--device", choices=("cpu", "cuda"), default=default_device(), help="Default device when --play-device or --inference-device are omitted.")
-  parser.add_argument("--play-device", choices=("cpu", "cuda"), help="Device for self-play workers and MCTS.")
-  parser.add_argument("--inference-device", choices=("cpu", "cuda"), help="Device for NMCTS model inference. Defaults to --play-device or --device.")
+  parser.add_argument("--play-device", choices=("cpu", "cuda"), help="Device for self-play, including NMCTS inference.")
+  parser.add_argument("--inference-device", choices=("cpu", "cuda"), help="Device for NMCTS model inference. Defaults to --play-device.")
   parser.add_argument("--workers", type=int, default=1, help="Parallel self-play worker processes.")
   parser.add_argument("--record-output", help="Optional path to save recorded game data.")
   parser.add_argument("--show-mcts-timing", action="store_true", help="Print MCTS phase breakdown per move.")
   parser.add_argument(
     "--batched-inference",
     action="store_true",
-    help="Use a shared inference server for NMCTS (auto-enabled when play and inference devices differ, or workers>1 on cuda).",
+    help="Use a shared CUDA inference server for NMCTS (for multi-worker or explicit batched runs on CUDA).",
   )
   parser.add_argument("--inference-batch-size", type=int, default=32, help="Batch size for inference.")
   parser.add_argument("--inference-max-wait-ms", type=float, default=5.0, help="Maximum wait time for inference.")
@@ -70,7 +70,7 @@ def _should_use_inference_server(
     return False
   if not inference_device.startswith("cuda"):
     return False
-  return batched_inference or workers > 1 or play_device != inference_device
+  return batched_inference or workers > 1
 
 
 def _build_worker_args(
@@ -189,7 +189,7 @@ def run_matches(
   if play_device is None:
     play_device = device or default_device()
   if inference_device is None:
-    inference_device = play_device if device is None else (device or play_device)
+    inference_device = play_device
   workers = max(1, workers)
   results = Counter()
   records = []
@@ -234,7 +234,7 @@ def run_matches(
             True,
             player_one_iters,
             player_one_model,
-            worker_device if use_inference_server else inference_device,
+            inference_device,
             "player_one",
             "--player1-model",
             show_mcts_timing=show_mcts_timing,
@@ -246,7 +246,7 @@ def run_matches(
             False,
             player_two_iters,
             player_two_model,
-            worker_device if use_inference_server else inference_device,
+            inference_device,
             "player_two",
             "--player2-model",
             show_mcts_timing=show_mcts_timing,
@@ -395,9 +395,6 @@ def main():
   args = build_parser().parse_args()
   play_device = args.play_device or args.device
   inference_device = args.inference_device or play_device
-  batched_inference = args.batched_inference or (
-    play_device != inference_device and inference_device.startswith("cuda")
-  )
   summary = run_matches(
     game_type=args.game_type,
     num_games=args.num_games,
@@ -412,7 +409,7 @@ def main():
     record_output=args.record_output,
     workers=args.workers,
     show_mcts_timing=args.show_mcts_timing,
-    batched_inference=batched_inference,
+    batched_inference=args.batched_inference,
     inference_batch_size=args.inference_batch_size,
     inference_max_wait_ms=args.inference_max_wait_ms,
   )
