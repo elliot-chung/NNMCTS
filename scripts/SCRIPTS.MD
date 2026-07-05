@@ -2,7 +2,7 @@
 
 Helper scripts for AWS GPU training, checkpoint export, and demo setup. Run all commands from the **repository root** unless noted otherwise.
 
-For local training without AWS, use the top-level entry points (`run_pipeline.py`, `train_model.py`, `play_matches.py`) described in the main [README](../README.md).
+For local training without AWS, use the top-level entry points (`run_pipeline.py`, `train_model.py`, `play_matches.py`) described in the main [README](../README.md). Local `run_pipeline.py` supports the same device split (`--play-device`, `--train-device`) and checkpoint resume (`--initial-checkpoint`, `--start-round`) used on cloud GPU instances.
 
 ## Overview
 
@@ -426,7 +426,7 @@ Benchmarks self-play wall time and MCTS phase breakdown using `play_matches.run_
 |----------|---------|-------------|
 | `--game-type` | `UTTT` | `TTT` or `UTTT` |
 | `--num-games` | `5` | Games to play |
-| `--device` | Auto (CUDA if available) | PyTorch device |
+| `--device` | Auto (CUDA if available) | PyTorch device for self-play |
 | `--workers` | `1` | Parallel workers |
 | `--player1-type`, `--player2-type` | `nmcts` | `random`, `mcts`, or `nmcts` |
 | `--player1-iters`, `--player2-iters` | `50` | MCTS simulations per move |

@@ -73,7 +73,8 @@ Pit two players against each other and print win/draw statistics. Optionally rec
 |------|---------|-------------|
 | `--player1-iters` / `--player2-iters` | 100 | MCTS simulations per move |
 | `--player1-model` / `--player2-model` | — | Checkpoint path (required for `nmcts`) |
-| `--device` | `cpu` | PyTorch device (`cpu`, `cuda`, etc.) |
+| `--device` | auto (`cuda` if available) | Default device when `--play-device` is omitted |
+| `--play-device` | — | Device for self-play, including NMCTS inference (overrides `--device`) |
 | `--workers` | 1 | Parallel self-play worker processes |
 | `--record-output` | — | Save recorded positions to this `.pkl` path |
 | `--show-mcts-timing` | off | Print MCTS phase breakdown per move |
@@ -178,7 +179,10 @@ Alternate self-play and supervised training for several rounds. Each round gener
 | `--player1-iters` / `--player2-iters` | 100 | MCTS simulations per move |
 | `--player1-model` / `--player2-model` | — | Fixed checkpoint for an `nmcts` player; if omitted, the latest trained checkpoint is used |
 | `--initial-checkpoint` | — | Starting weights for training and for `nmcts` before round 1 |
-| `--device` | `cpu` | PyTorch device |
+| `--start-round` | — | First pipeline round number (default: one past the round in `--initial-checkpoint`, or `1`) |
+| `--device` | auto (`cuda` if available) | Default device when `--play-device` or `--train-device` are omitted |
+| `--play-device` | — | Device for self-play and NMCTS inference; defaults to `cpu` when `--train-device` is `cuda`, otherwise `--device` |
+| `--train-device` | — | Device for supervised training; defaults to `--device` |
 | `--epochs` | 100 | Training epochs per round |
 | `--batch-size` | 64 | Minibatch size |
 | `--learning-rate` | 1e-3 | Adam learning rate |
@@ -227,8 +231,22 @@ python run_pipeline.py \
   --augment-train \
   --deduplicate-train \
   --self-play-workers 4 \
+  --play-device cpu \
+  --train-device cuda \
   --device cuda \
   --amp
+
+# Resume locally from an existing checkpoint (round numbering continues from the filename)
+python run_pipeline.py \
+  --game-type UTTT \
+  --rounds 5 \
+  --games-per-round 100 \
+  --output-dir output \
+  --player1-type nmcts \
+  --player2-type nmcts \
+  --initial-checkpoint output/checkpoints/round_020.pt \
+  --play-device cpu \
+  --train-device cuda
 ```
 
 ## Project structure
@@ -239,7 +257,8 @@ python run_pipeline.py \
 | `run_pipeline.py` | Self-play + training loop |
 | `infra/` | AWS CDK stack (S3, GPU EC2 launch template) |
 | `cloud/` | GPU instance bootstrap script |
-| `scripts/` | Deploy, train, and teardown helpers |
+| `scripts/` | Deploy, train, and teardown helpers (see [scripts/SCRIPTS.MD](scripts/SCRIPTS.MD)) |
+| `cloud/install-gpu-deps.sh` | Shared GPU dependency installer (used by AMI bake and instance bootstrap) |
 | `config/local.example.json` | Example local AWS settings (copy to `local.json`) |
 | `config/cloud-training.json` | Cloud training hyperparameters and timeouts |
 
@@ -299,8 +318,10 @@ Both sections use the same fields. Values are passed to `run_pipeline.py` on eac
 | `player1Type` | Player 1 engine: `random`, `mcts` (pure MCTS), or `nmcts` (MCTS guided by the neural net). |
 | `player2Type` | Player 2 engine; same choices as `player1Type`. |
 | `selfPlayWorkers` | Parallel self-play worker processes (GPU runs only). |
+| `playDevice` | Device for self-play and NMCTS inference on the instance (`cpu` or `cuda`). Cloud defaults use `cpu`. |
+| `trainDevice` | Device for supervised training on the instance (`cpu` or `cuda`). Cloud defaults use `cuda`. |
 
-Smoke defaults use a tiny UTTT workload with `mcts` players. Full GPU defaults target a larger `UTTT` run with `nmcts` players.
+Smoke defaults use a tiny UTTT workload with `mcts` players. Full GPU defaults target a larger `UTTT` run with `nmcts` players. The default device split keeps self-play on CPU and training on GPU to avoid CUDA contention during data generation.
 
 Cloud builds always enable `--augment-train` and `--deduplicate-train`. Other `run_pipeline.py` flags (learning rate, loss weights, val split, etc.) are not exposed in this config and keep their Python defaults.
 
@@ -313,7 +334,7 @@ Cloud builds always enable `--augment-train` and `--deduplicate-train`. Other `r
 | `maxSmokeTrainingSeconds` | GPU smoke EC2 | Max seconds for the smoke test training phase. |
 | `maxSmokeInstanceSeconds` | GPU smoke EC2 | Total wall-clock budget for the smoke test instance. |
 
-**No redeploy needed:** changing hyperparameters under `gpuSmoke` or `gpu`, or per-run timeout overrides (see below). Values are sent as EC2 tags on launch.
+**No redeploy needed:** changing hyperparameters under `gpuSmoke` or `gpu` (including `playDevice` / `trainDevice`), or per-run timeout overrides (see below). Values are sent as EC2 tags on launch.
 
 #### Per-run overrides
 
@@ -330,11 +351,15 @@ Script flags override the config file for a single run without editing JSON:
 | `-Player1Type` | Smoke, GPU | `player1Type` |
 | `-Player2Type` | Smoke, GPU | `player2Type` |
 | `-SelfPlayWorkers` | Smoke, GPU | `selfPlayWorkers` |
+| `-InitialCheckpointPath` | Full GPU only | Bundles a local `.pt` checkpoint into the source zip and resumes with `--initial-checkpoint` (skips smoke) |
+| `-StartRound` | Full GPU only | First pipeline round number (default: inferred from checkpoint filename) |
 | `-MaxTrainingSeconds` | Full GPU only | `timeouts.maxTrainingSeconds` |
 | `-MaxInstanceSeconds` | Full GPU only | `timeouts.maxInstanceSeconds` |
 | `-ConfigPath` | Smoke, GPU | Path to an alternate JSON config file |
 | `-SmokeOnly` | Pipeline | Run only the GPU smoke test |
 | `-SkipSmoke` | Pipeline | Skip smoke and launch full training directly |
+
+`playDevice` and `trainDevice` are set in `config/cloud-training.json` only; they are not exposed as script CLI flags.
 
 Examples:
 
@@ -414,6 +439,17 @@ Training limits and GPU defaults come from `config/cloud-training.json`. Per-run
 ```powershell
 .\scripts\run_gpu_training.ps1 -Rounds 10 -MaxTrainingSeconds 7200
 ```
+
+Resume from a local checkpoint (bundles the `.pt` into the uploaded source zip; smoke is skipped):
+
+```powershell
+.\scripts\run_gpu_training.ps1 `
+  -InitialCheckpointPath artifacts\gpu-20260701-192839\round_020.pt `
+  -Rounds 10 `
+  -Wait
+```
+
+Round numbering continues from the checkpoint name (e.g. `round_020.pt` → next checkpoint is `round_021.pt`) unless you pass `-StartRound`. Run metadata is saved to `artifacts/latest-gpu-run.json`. See [scripts/SCRIPTS.MD](scripts/SCRIPTS.MD) for download, ONNX export, and monitoring workflows.
 
 The instance always shuts down when the script exits. Live logs stream to CloudWatch log group `/nnmcts/gpu-training` (one stream per instance ID); `.\scripts\check_gpu_training.ps1` fetches recent events from there. A full log archive is also uploaded to `s3://<bucket>/runs/<run-id>/gpu-train.log` when the run completes.
 
