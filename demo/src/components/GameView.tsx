@@ -21,7 +21,7 @@ export function GameView() {
     game,
     phase,
     humanSide,
-    difficulty,
+    searchTimeLimit,
     forcedBoard,
     legalMoves,
     isHumanTurn,
@@ -30,7 +30,7 @@ export function GameView() {
     makeHumanMove,
     newGame,
     setHumanSide,
-    setDifficulty,
+    setSearchTimeLimit,
   } = useGame();
 
   const boardDisabled = !isHumanTurn || phase === "ai_thinking";
@@ -63,7 +63,7 @@ export function GameView() {
           <Card size="sm">
             <CardHeader>
               <CardTitle>Game Controls</CardTitle>
-              <CardDescription>Configure side and difficulty</CardDescription>
+              <CardDescription>Configure side and search time</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               <SideSelector
@@ -72,12 +72,12 @@ export function GameView() {
                 disabled={settingsDisabled}
               />
               <DifficultySlider
-                value={difficulty}
-                onChange={setDifficulty}
+                value={searchTimeLimit}
+                onChange={setSearchTimeLimit}
                 disabled={settingsDisabled}
               />
               <NewGameButton
-                onNewGame={() => newGame({ humanSide, difficulty })}
+                onNewGame={() => newGame({ humanSide, searchTimeLimit })}
                 disabled={settingsDisabled}
               />
             </CardContent>

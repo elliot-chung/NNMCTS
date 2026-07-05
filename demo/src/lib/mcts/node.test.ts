@@ -105,7 +105,7 @@ describe("mcts", () => {
 
     const game = new UTTTGame();
     const root = createRootNode<Move, UTTTGame>(game);
-    const { move, policy } = await mcts(root, { iters: 25 });
+    const { move, policy } = await mcts(root, { timeLimitSeconds: 0.1 });
 
     expect(game.validMoves().length).toBeGreaterThan(0);
     expect(move).toBeDefined();

@@ -6,8 +6,8 @@ import { useAiPlayer } from "@/hooks/useAiPlayer";
 import { getUtttModelEntry } from "@/lib/model/loader";
 import { UTTTGame, type Move, type Player } from "@/lib/uttt";
 
-export const MCTS_ITERATIONS = [10, 25, 50, 100] as const;
-export type MctsDifficulty = (typeof MCTS_ITERATIONS)[number];
+export const MCTS_TIME_LIMITS = [0.01, 0.1, 1, 3, 5] as const;
+export type MctsTimeLimit = (typeof MCTS_TIME_LIMITS)[number];
 
 export type GamePhase = "playing" | "ai_thinking" | "finished";
 
@@ -19,7 +19,7 @@ export type ModelLoadState =
 
 export interface GameConfig {
   humanSide: Player;
-  difficulty: MctsDifficulty;
+  searchTimeLimit: MctsTimeLimit;
 }
 
 function moveToIndex(move: Move): number {
@@ -42,8 +42,8 @@ export function useGame(initialConfig?: Partial<GameConfig>) {
   const [humanSide, setHumanSide] = useState<Player>(
     initialConfig?.humanSide ?? 1,
   );
-  const [difficulty, setDifficulty] = useState<MctsDifficulty>(
-    initialConfig?.difficulty ?? 25,
+  const [searchTimeLimit, setSearchTimeLimit] = useState<MctsTimeLimit>(
+    initialConfig?.searchTimeLimit ?? 1,
   );
   const [game, setGame] = useState(() => new UTTTGame());
   const [phase, setPhase] = useState<GamePhase>("playing");
@@ -53,10 +53,10 @@ export function useGame(initialConfig?: Partial<GameConfig>) {
   const aiRequestRef = useRef(0);
   const pendingAiRef = useRef<{
     game: UTTTGame;
-    difficulty: MctsDifficulty;
+    searchTimeLimit: MctsTimeLimit;
   } | null>(null);
   const runAiTurnRef = useRef<
-    (currentGame: UTTTGame, currentDifficulty: MctsDifficulty) => void
+    (currentGame: UTTTGame, currentSearchTimeLimit: MctsTimeLimit) => void
   >(() => {});
 
   const ai = useAiPlayer({ modelUrl });
@@ -105,8 +105,7 @@ export function useGame(initialConfig?: Partial<GameConfig>) {
     return {
       status: "ready",
       useNeural: false,
-      message:
-        ai.statusMessage ?? "Neural model unavailable — using pure MCTS",
+      message: ai.statusMessage ?? "Neural model unavailable — using pure MCTS",
     };
   }, [ai.isReady, ai.statusMessage, ai.useNeural, manifestError]);
 
@@ -117,7 +116,7 @@ export function useGame(initialConfig?: Partial<GameConfig>) {
   const isHumanTurn = game.currentTurn() === humanSide && phase === "playing";
 
   const runAiTurn = useCallback(
-    async (currentGame: UTTTGame, currentDifficulty: MctsDifficulty) => {
+    async (currentGame: UTTTGame, currentSearchTimeLimit: MctsTimeLimit) => {
       const requestId = ++aiRequestRef.current;
       setPhase("ai_thinking");
 
@@ -127,12 +126,12 @@ export function useGame(initialConfig?: Partial<GameConfig>) {
         } else if (nextGame.currentTurn() === humanSide) {
           setPhase("playing");
         } else {
-          runAiTurnRef.current(nextGame, currentDifficulty);
+          runAiTurnRef.current(nextGame, currentSearchTimeLimit);
         }
       };
 
       try {
-        const { move } = await ai.think(currentGame, currentDifficulty);
+        const { move } = await ai.think(currentGame, currentSearchTimeLimit);
         if (requestId !== aiRequestRef.current) {
           return;
         }
@@ -172,12 +171,15 @@ export function useGame(initialConfig?: Partial<GameConfig>) {
       return;
     }
     pendingAiRef.current = null;
-    void runAiTurn(pending.game, pending.difficulty);
+    void runAiTurn(pending.game, pending.searchTimeLimit);
   }, [ai.isReady, runAiTurn]);
 
   const scheduleAiMove = useCallback(
-    (currentGame: UTTTGame, currentDifficulty: MctsDifficulty) => {
-      pendingAiRef.current = { game: currentGame, difficulty: currentDifficulty };
+    (currentGame: UTTTGame, currentSearchTimeLimit: MctsTimeLimit) => {
+      pendingAiRef.current = {
+        game: currentGame,
+        searchTimeLimit: currentSearchTimeLimit,
+      };
       setPhase("ai_thinking");
       startPendingAiTurn();
     },
@@ -195,25 +197,25 @@ export function useGame(initialConfig?: Partial<GameConfig>) {
       pendingAiRef.current = null;
 
       const nextHumanSide = config?.humanSide ?? humanSide;
-      const nextDifficulty = config?.difficulty ?? difficulty;
+      const nextSearchTimeLimit = config?.searchTimeLimit ?? searchTimeLimit;
 
       if (config?.humanSide !== undefined) {
         setHumanSide(config.humanSide);
       }
-      if (config?.difficulty !== undefined) {
-        setDifficulty(config.difficulty);
+      if (config?.searchTimeLimit !== undefined) {
+        setSearchTimeLimit(config.searchTimeLimit);
       }
 
       const freshGame = new UTTTGame();
       setGame(freshGame);
 
       if (nextHumanSide === -1) {
-        scheduleAiMove(freshGame, nextDifficulty);
+        scheduleAiMove(freshGame, nextSearchTimeLimit);
       } else {
         setPhase("playing");
       }
     },
-    [ai, difficulty, humanSide, scheduleAiMove],
+    [ai, humanSide, scheduleAiMove, searchTimeLimit],
   );
 
   const makeHumanMove = useCallback(
@@ -239,9 +241,9 @@ export function useGame(initialConfig?: Partial<GameConfig>) {
         return;
       }
 
-      scheduleAiMove(nextGame, difficulty);
+      scheduleAiMove(nextGame, searchTimeLimit);
     },
-    [ai, difficulty, game, humanSide, legalMoves, phase, scheduleAiMove],
+    [ai, game, humanSide, legalMoves, phase, scheduleAiMove, searchTimeLimit],
   );
 
   return {
@@ -249,7 +251,7 @@ export function useGame(initialConfig?: Partial<GameConfig>) {
     phase,
     humanSide,
     aiSide,
-    difficulty,
+    searchTimeLimit,
     forcedBoard,
     legalMoves,
     isHumanTurn,
@@ -259,6 +261,6 @@ export function useGame(initialConfig?: Partial<GameConfig>) {
     makeHumanMove,
     newGame,
     setHumanSide,
-    setDifficulty,
+    setSearchTimeLimit,
   };
 }

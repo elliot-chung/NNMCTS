@@ -15,7 +15,8 @@ export async function mcts<TMove>(
   root: Node<TMove, MctsEnvironment<TMove>>,
   options: MctsOptions = {},
 ): Promise<MctsResult<TMove>> {
-  const { iters = 100, showExecutionTime = false } = options;
+  const { timeLimitSeconds = 1, showExecutionTime = false } = options;
+  const deadline = performance.now() + timeLimitSeconds * 1000;
   const executionTimes: Array<{
     traverseTime: number;
     rolloutTime: number;
@@ -23,7 +24,7 @@ export async function mcts<TMove>(
     createTime: number;
   }> = [];
 
-  for (let i = 0; i < iters; i++) {
+  do {
     const perf = {
       traverseTime: 0,
       rolloutTime: 0,
@@ -32,7 +33,9 @@ export async function mcts<TMove>(
     };
     await root.explore(perf);
     executionTimes.push(perf);
-  }
+  } while (performance.now() < deadline);
+
+  const iters = executionTimes.length;
 
   if (showExecutionTime) {
     const totals = executionTimes.reduce(

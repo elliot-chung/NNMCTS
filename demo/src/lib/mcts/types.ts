@@ -23,7 +23,7 @@ export interface ExplorePerf {
 }
 
 export interface MctsOptions {
-  iters?: number;
+  timeLimitSeconds?: number;
   showExecutionTime?: boolean;
 }
 

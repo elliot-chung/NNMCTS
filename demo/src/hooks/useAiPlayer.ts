@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { MctsDifficulty } from "@/hooks/useGame";
+import type { MctsTimeLimit } from "@/hooks/useGame";
 import { UTTTGame, type Move } from "@/lib/uttt";
 import type {
   SerializedGame,
@@ -141,7 +141,7 @@ export function useAiPlayer(options: UseAiPlayerOptions = {}) {
   }, []);
 
   const think = useCallback(
-    (game: UTTTGame, iterations: MctsDifficulty): Promise<AiMoveResult> => {
+    (game: UTTTGame, timeLimitSeconds: MctsTimeLimit): Promise<AiMoveResult> => {
       const worker = workerRef.current;
       if (!worker || !isReady) {
         return Promise.reject(new Error("AI worker is not ready"));
@@ -160,7 +160,7 @@ export function useAiPlayer(options: UseAiPlayerOptions = {}) {
           type: "think",
           requestId,
           game: serializeGame(game),
-          iterations,
+          timeLimitSeconds,
           useNeural,
         } satisfies WorkerRequest);
       });

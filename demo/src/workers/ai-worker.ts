@@ -16,7 +16,7 @@ export type WorkerRequest =
       type: "think";
       requestId: string;
       game: SerializedGame;
-      iterations: number;
+      timeLimitSeconds: number;
       useNeural?: boolean;
     }
   | { type: "cancel"; requestId?: string };
@@ -123,7 +123,9 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
           return;
         }
 
-        const { move, policy } = await mcts(root, { iters: message.iterations });
+        const { move, policy } = await mcts(root, {
+          timeLimitSeconds: message.timeLimitSeconds,
+        });
 
         if (cancelled || activeRequestId !== message.requestId) {
           return;
