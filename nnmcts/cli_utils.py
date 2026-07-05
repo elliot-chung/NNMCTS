@@ -131,11 +131,10 @@ class ScriptNeuralMCTSPlayer(Player):
     environment,
     is_first,
     iter_count: int,
-    model: torch.nn.Module | None,
+    model: torch.nn.Module,
     build_tensor,
     player_name: str,
     uses_mask: bool = False,
-    inference_client=None,
     show_mcts_timing: bool = False,
   ):
     super().__init__(environment, is_first)
@@ -145,14 +144,7 @@ class ScriptNeuralMCTSPlayer(Player):
 
     node_name = f"{player_name}NeuralNode"
     self.node_cls = type(node_name, (NeuralNode,), {})
-    self.node_cls.build_tensor = build_tensor
-    self.node_cls.uses_mask = uses_mask
-    if inference_client is not None:
-      self.node_cls.inference_client = inference_client
-      self.node_cls.model = None
-    else:
-      self.node_cls.model = model
-      self.node_cls.inference_client = None
+    self.node_cls.set_model(model, build_tensor, uses_mask=uses_mask)
 
   def on_my_turn(self):
     env_copy = self.environment.copy()
@@ -171,7 +163,6 @@ def create_player(
   device: str,
   player_name: str,
   model_arg_name: str | None = None,
-  inference_client=None,
   show_mcts_timing: bool = False,
 ) -> Player:
   normalized_type = player_type.lower()
@@ -181,15 +172,13 @@ def create_player(
     return MCTS_Player(environment, is_first, iter_count, show_mcts_timing=show_mcts_timing)
   if normalized_type != "nmcts":
     raise ValueError(f"Unsupported player type: {player_type}")
-  if model_path is None and inference_client is None:
+  if model_path is None:
     required_arg = model_arg_name or f"--{player_name.replace('_', '-')}-model"
     raise ValueError(f"{player_name} requires {required_arg} when using nmcts")
 
   spec = get_game_spec(game_type)
-  model = None
-  if inference_client is None:
-    model, _ = build_model(game_type, checkpoint_path=model_path, device=device)
-    model.eval()
+  model, _ = build_model(game_type, checkpoint_path=model_path, device=device)
+  model.eval()
   return ScriptNeuralMCTSPlayer(
     environment,
     is_first,
@@ -198,7 +187,6 @@ def create_player(
     spec.build_tensor,
     player_name,
     uses_mask=spec.uses_mask,
-    inference_client=inference_client,
     show_mcts_timing=show_mcts_timing,
   )
 

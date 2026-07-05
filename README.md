@@ -77,9 +77,6 @@ Pit two players against each other and print win/draw statistics. Optionally rec
 | `--workers` | 1 | Parallel self-play worker processes |
 | `--record-output` | — | Save recorded positions to this `.pkl` path |
 | `--show-mcts-timing` | off | Print MCTS phase breakdown per move |
-| `--batched-inference` | off | Shared GPU inference server for `nmcts` on CUDA |
-| `--inference-batch-size` | 32 | Batch size for batched inference |
-| `--inference-max-wait-ms` | 5.0 | Max wait before flushing an inference batch |
 
 **Examples**
 
@@ -194,7 +191,6 @@ Alternate self-play and supervised training for several rounds. Each round gener
 | `--deduplicate-train` / `--deduplicate-val` | off | Deduplicate positions |
 | `--accumulate-records` | off | Train each round on all games seen so far |
 | `--self-play-workers` | 1 | Parallel self-play workers |
-| `--batched-inference` | off | Shared GPU inference for `nmcts` |
 | `--show-mcts-timing` | off | MCTS timing diagnostics |
 | `--amp` | off | Mixed-precision training on CUDA |
 

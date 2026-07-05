@@ -51,11 +51,6 @@ def build_parser():
   parser.add_argument("--deduplicate-train", action="store_true", help="Deduplicate training dataset.")
   parser.add_argument("--deduplicate-val", action="store_true", help="Deduplicate validation dataset.")
   parser.add_argument("--self-play-workers", type=int, default=1, help="Parallel self-play worker processes.")
-  parser.add_argument(
-    "--batched-inference",
-    action="store_true",
-    help="Use a shared CUDA inference server for NMCTS during self-play (only when --play-device is cuda).",
-  )
   parser.add_argument("--show-mcts-timing", action="store_true", help="Print MCTS phase breakdown per move.")
   parser.add_argument("--amp", action="store_true", help="Enable mixed-precision training on CUDA.")
   return parser
@@ -140,7 +135,6 @@ def main():
       record_output=str(round_dataset_path),
       workers=args.self_play_workers,
       show_mcts_timing=args.show_mcts_timing,
-      batched_inference=args.batched_inference,
     )
 
     training_dataset_path = round_dataset_path

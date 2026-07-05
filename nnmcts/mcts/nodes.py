@@ -176,7 +176,6 @@ import torch
 class NeuralNode(Node):
   model = None
   build_tensor = None
-  inference_client = None
   uses_mask = False
 
   def __init__(self, environment, terminal, parent, action):
@@ -192,28 +191,11 @@ class NeuralNode(Node):
     cls.build_tensor = closure
     cls.uses_mask = uses_mask
 
-  @classmethod
-  def set_inference_client(cls, client, closure, uses_mask: bool = False):
-    cls.inference_client = client
-    cls.build_tensor = closure
-    cls.uses_mask = uses_mask
-    cls.model = None
-
   def _evaluate(self):
     if self.environment.is_terminal():
       return -(self.environment.get_winner() * self.environment.current_turn())
 
     node_cls = type(self)
-
-    if node_cls.inference_client is not None:
-      policy, reward = node_cls.inference_client.evaluate_node(
-        self,
-        node_cls.build_tensor,
-        uses_mask=node_cls.uses_mask,
-      )
-      self.neural_policy = policy
-      return -reward
-
     device = next(node_cls.model.parameters()).device
     tensor = node_cls.build_tensor(self).to(device)
 

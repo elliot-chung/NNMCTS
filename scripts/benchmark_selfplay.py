@@ -25,9 +25,6 @@ def build_parser():
   parser.add_argument("--device", default=default_device())
   parser.add_argument("--workers", type=int, default=1)
   parser.add_argument("--output", help="Optional JSON path for benchmark results.")
-  parser.add_argument("--batched-inference", action="store_true")
-  parser.add_argument("--inference-batch-size", type=int, default=32)
-  parser.add_argument("--inference-max-wait-ms", type=float, default=5.0)
 
   for player_idx in (1, 2):
     parser.add_argument(f"--player{player_idx}-type", choices=("random", "mcts", "nmcts"), default="nmcts")
@@ -52,9 +49,6 @@ def main():
     player_two_model=args.player2_model,
     device=args.device,
     workers=args.workers,
-    batched_inference=args.batched_inference,
-    inference_batch_size=args.inference_batch_size,
-    inference_max_wait_ms=args.inference_max_wait_ms,
     collect_benchmark=True,
   )
   total_wall_time = perf_counter() - total_start

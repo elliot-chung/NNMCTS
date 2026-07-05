@@ -448,7 +448,7 @@ Writes `index.json` and one JSON file per scenario under the output directory.
 
 Benchmarks self-play wall time and MCTS phase breakdown using `play_matches.run_matches`.
 
-**When to use:** Profiling throughput, comparing player types, or tuning worker/batched-inference settings.
+**When to use:** Profiling throughput, comparing player types, or tuning worker settings.
 
 **Prerequisites:** Activated venv with PyTorch; optional checkpoint for `nmcts` players.
 
@@ -461,9 +461,6 @@ Benchmarks self-play wall time and MCTS phase breakdown using `play_matches.run_
 | `--player1-type`, `--player2-type` | `nmcts` | `random`, `mcts`, or `nmcts` |
 | `--player1-iters`, `--player2-iters` | `50` | MCTS simulations per move |
 | `--player1-model`, `--player2-model` | None | Checkpoint paths for NMCTS |
-| `--batched-inference` | off | Enable batched neural inference |
-| `--inference-batch-size` | `32` | Batch size when batched |
-| `--inference-max-wait-ms` | `5.0` | Max wait to fill a batch |
 | `--output` | None | Optional JSON report path |
 
 **Examples:**
