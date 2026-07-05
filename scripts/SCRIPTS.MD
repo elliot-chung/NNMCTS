@@ -8,9 +8,9 @@ For local training without AWS, use the top-level entry points (`run_pipeline.py
 
 | Category | Scripts | Purpose |
 |----------|---------|---------|
-| AWS cloud pipeline | `run_cloud_pipeline.ps1`, `run_gpu_training.ps1`, `resume_gpu_training.ps1`, `check_gpu_training.ps1`, `teardown_cloud_pipeline.ps1` | Deploy infrastructure, launch GPU training on EC2, resume from a local checkpoint, monitor runs, tear down |
+| AWS cloud pipeline | `run_cloud_pipeline.ps1`, `run_gpu_training.ps1`, `check_gpu_training.ps1`, `teardown_cloud_pipeline.ps1` | Deploy infrastructure, launch GPU training on EC2, resume from a local checkpoint (`-InitialCheckpointPath`), monitor runs, tear down |
 | Source packaging | `package_source.ps1`, `package_source.py` | Zip the repo (excluding checkpoints, `node_modules`, etc.) for S3 upload |
-| Model → demo | `download_checkpoint.ps1`, `export_onnx.py`, `validate_onnx.py`, `generate_uttt_fixtures.py` | Pull a trained checkpoint, export ONNX for the browser demo, validate parity, regenerate test fixtures |
+| Model → demo | `download_checkpoint.ps1`, `export_onnx.py`, `validate_onnx.py` | Pull a trained checkpoint, export ONNX for the browser demo, validate parity |
 | Development | `benchmark_selfplay.py` | Measure self-play throughput and MCTS timing |
 | Publishing | `check_public_safety.ps1` | Scan the repo for account IDs, emails, or local paths before making it public |
 
@@ -87,12 +87,7 @@ Bundle a local `.pt` checkpoint into the source zip, launch EC2, and continue th
 Smoke tests are skipped automatically when a checkpoint is provided.
 
 ```powershell
-# Convenience wrapper (requires -InitialCheckpointPath)
-.\scripts\resume_gpu_training.ps1 `
-  -InitialCheckpointPath artifacts\gpu-20260701-192839\round_020.pt `
-  -Wait
-
-# Equivalent via run_gpu_training.ps1
+# Resume via run_gpu_training.ps1 (requires -InitialCheckpointPath)
 .\scripts\run_gpu_training.ps1 `
   -InitialCheckpointPath artifacts\gpu-20260701-192839\round_020.pt `
   -Rounds 10 `
@@ -117,11 +112,11 @@ After training (or using a published checkpoint):
 # 2. Export PyTorch checkpoint to ONNX (adjust path to match your run)
 python scripts\export_onnx.py --checkpoint artifacts\<run-id>\round_020.pt
 
-# 3. Verify PyTorch vs ONNX Runtime parity
-python scripts\validate_onnx.py --checkpoint artifacts\<run-id>\round_020.pt
+# 3. Copy ONNX to demo/public/models/ if you used a custom --output path
+#    (default export path is already demo/public/models/uttt-v1.onnx)
 
-# 4. Regenerate golden fixtures for demo tests (optional but recommended after model changes)
-python scripts\generate_uttt_fixtures.py --checkpoint artifacts\<run-id>\round_020.pt
+# 4. Verify PyTorch vs ONNX Runtime parity
+python scripts\validate_onnx.py --checkpoint artifacts\<run-id>\round_020.pt
 
 # 5. Run the demo
 cd demo
@@ -240,30 +235,6 @@ Launches a single on-demand `g4dn.xlarge` GPU instance without going through the
 ```
 
 Resume runs use run ID prefix `gpu-resume-`. When `-InitialCheckpointPath` is set, the checkpoint is embedded at `bundled-checkpoint/<filename>` inside the uploaded source zip.
-
----
-
-### `resume_gpu_training.ps1`
-
-Convenience wrapper around `run_gpu_training.ps1` for continuing training from a local checkpoint. Equivalent to `run_gpu_training.ps1 -TrainingProfile gpu -InitialCheckpointPath ...` with smoke skipped.
-
-**When to use:** After downloading a checkpoint locally, or when you already have a `.pt` file on disk and want a one-flag launch.
-
-| Parameter | Description |
-|-----------|-------------|
-| `-InitialCheckpointPath` | **Required.** Path to a local `.pt` checkpoint |
-| `-StartRound` | Optional first round number (default: inferred from filename, e.g. `round_020.pt` → round 21) |
-| `-Rounds`, `-GamesPerRound`, `-Epochs`, etc. | Same training overrides as `run_gpu_training.ps1` |
-| `-Wait` | Block until manifest appears |
-
-**Example:**
-
-```powershell
-.\scripts\resume_gpu_training.ps1 `
-  -InitialCheckpointPath artifacts\gpu-20260701-192839\round_020.pt `
-  -Rounds 10 `
-  -Wait
-```
 
 ---
 
@@ -421,29 +392,6 @@ Exit code `0` = PASS, `1` = FAIL.
 
 ---
 
-### `generate_uttt_fixtures.py`
-
-Generates golden inference fixtures (policy logits + value) for TypeScript tests in the demo app.
-
-**When to use:** After exporting a new model, or when demo inference tests need updated expected values.
-
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `--checkpoint` | See `export_onnx.py` | PyTorch checkpoint |
-| `--output-dir` | `demo/src/lib/__fixtures__/inference` | Fixture output directory |
-| `--random-count` | `8` | Additional random positions |
-| `--seed` | `42` | Random seed |
-
-**Example:**
-
-```powershell
-python scripts\generate_uttt_fixtures.py --checkpoint artifacts\gpu-20260702-140754\round_020.pt
-```
-
-Writes `index.json` and one JSON file per scenario under the output directory.
-
----
-
 ### `benchmark_selfplay.py`
 
 Benchmarks self-play wall time and MCTS phase breakdown using `play_matches.run_matches`.
@@ -525,8 +473,7 @@ Exit code `0` = clean, `1` = potential issues listed to stdout.
 
 | Symptom | Likely cause | What to do |
 |---------|--------------|------------|
-| Demo loads but plays poorly | Old ONNX in `demo/public/models/` | Re-export and validate; hard-refresh browser |
-| Demo tests fail after model update | Stale fixtures | Run `generate_uttt_fixtures.py` after export |
+| Demo loads but plays poorly | Old ONNX in `demo/public/models/` | Re-run `export_onnx.py`, copy to `demo/public/models/` if needed, then `validate_onnx.py`; hard-refresh browser |
 
 ### Public safety scan
 

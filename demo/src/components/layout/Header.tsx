@@ -6,7 +6,7 @@ export function Header() {
           Ultimate Tic-Tac-Toe vs AI
         </h1>
         <p className="text-sm text-muted-foreground">
-          Play against a neural-network MCTS opponent. Mock AI moves for now.
+          Play against a neural-network MCTS opponent powered by an ONNX model.
         </p>
       </div>
     </header>

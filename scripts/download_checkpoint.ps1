@@ -6,9 +6,8 @@
 # Manual bootstrap (if this script fails):
 #   aws s3 cp s3://nnmcts-artifacts-730335282892-us-west-1/runs/gpu-20260701-192839/manifest.json artifacts/gpu-20260701-192839/manifest.json --region us-west-1
 #   aws s3 cp s3://nnmcts-artifacts-730335282892-us-west-1/runs/gpu-20260701-192839/checkpoints/round_020.pt artifacts/gpu-20260701-192839/round_020.pt --region us-west-1
-#   python scripts/export_onnx.py
-#   python scripts/validate_onnx.py
-#   python scripts/generate_uttt_fixtures.py
+#   python scripts/export_onnx.py --checkpoint artifacts/gpu-20260701-192839/round_020.pt
+#   python scripts/validate_onnx.py --checkpoint artifacts/gpu-20260701-192839/round_020.pt
 param(
   [string]$Bucket = "nnmcts-artifacts-730335282892-us-west-1",
   [string]$RunId = "gpu-20260701-192839",
@@ -98,7 +97,6 @@ if ($failures.Count -gt 0) {
   Write-Host "Then export and validate:"
   Write-Host "  python scripts/export_onnx.py --checkpoint $checkpointPath"
   Write-Host "  python scripts/validate_onnx.py --checkpoint $checkpointPath"
-  Write-Host "  python scripts/generate_uttt_fixtures.py --checkpoint $checkpointPath"
   exit 1
 }
 

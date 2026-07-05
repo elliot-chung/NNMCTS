@@ -20,8 +20,7 @@ class Arena:
       "winner": None
     }
 
-  def play_game(self, show=False, record=False, on_turn=None):
-    if show: print(self.environment)
+  def play_game(self, record=False, on_turn=None):
     turn = 0
     while not self.environment.is_terminal():
       action1, policy1 = self.player_one.play_turn()
@@ -39,16 +38,13 @@ class Arena:
       turn += 1
       if on_turn is not None:
         on_turn(turn)
-      if show: print(self.environment)
 
     winner = self.environment.get_winner()
-    if show: print(f"Winner: {winner}")
     if record:
       self.record["winner"] = winner
       return winner, self.record
     
     return winner
-
 
 
 

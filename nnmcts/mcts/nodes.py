@@ -3,12 +3,6 @@ import weakref
 from math import sqrt, log
 from time import time
 
-NODE_LIST = []
-
-
-def clear_node_list():
-  NODE_LIST.clear()
-
 
 class Node:
   def __init__(self, environment, terminal, parent, action):
@@ -20,9 +14,6 @@ class Node:
     self.terminal = terminal
     self.parent = weakref.ref(parent) if parent else None
     self.action = action
-
-    ref = weakref.ref(self)
-    NODE_LIST.append(ref)
 
   def _ucb(self):
     if self.visit_count == 0:
@@ -44,18 +35,6 @@ class Node:
     child = node_cls(environment, environment.is_terminal(), self, action)
     self.child[action] = child
     return child
-
-  def _create_child(self):
-    if self.terminal:
-      return
-
-    actions = self.environment.valid_moves()
-    if self.child is None:
-      self.child = {}
-
-    for action in actions:
-      if action not in self.child:
-        self._expand_child(action)
 
   def _rollout(self):
     new_env = self.environment.copy()
@@ -127,7 +106,6 @@ class Node:
       perf["traverse_time"] = traverse_time
       perf["rollout_time"] = rollout_time
       perf["update_time"] = update_time
-      perf["create_time"] = 0.0
 
   def get_policy(self):
     if self.terminal:
@@ -157,17 +135,6 @@ class Node:
 
     most_visited_nodes = [child for child in self.child.values() if child.visit_count == max_visit]
     return random.choice(most_visited_nodes)
-
-  def detach_parent(self):
-    self.parent = None
-
-
-def print_tree(root_node, indent=0):
-  print('  ' * indent + f"- Environment: {root_node.environment.get_state()}, Visits: {root_node.visit_count}, Reward: {root_node.total_reward:.2f}")
-  if root_node.child:
-    for action, child_node in root_node.child.items():
-      print('  ' * (indent + 1) + f"Action: {action}")
-      print_tree(child_node, indent + 2)
 
 
 import torch

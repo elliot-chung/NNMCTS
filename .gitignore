@@ -11,6 +11,10 @@ __pycache__/
 smoke_local/
 config/local.json
 
+# Local run metadata (may contain account IDs and paths)
+artifacts/latest*.json
+artifacts/latest/
+
 # CDK / Node
 infra/node_modules/
 infra/cdk.out/

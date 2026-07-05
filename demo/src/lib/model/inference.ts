@@ -52,10 +52,6 @@ export function setModel(model: ModelInference | null): void {
   loadedModel = model;
 }
 
-export function isModelLoaded(): boolean {
-  return loadedModel !== null;
-}
-
 export async function loadModel(modelUrl: string): Promise<ModelInference> {
   const session = await createInferenceSession(modelUrl);
   return new OnnxModelInference(session);
@@ -66,41 +62,4 @@ export async function predict(input: Float32Array): Promise<InferenceResult> {
     throw new Error("Model not loaded");
   }
   return await loadedModel.predict(input);
-}
-
-export interface InferenceFixture {
-  name: string;
-  state: number[];
-  mask: number[];
-  expected_logits: number[];
-  expected_value: number;
-}
-
-export async function validateAgainstFixture(
-  fixture: InferenceFixture,
-  tolerance = 1e-4,
-): Promise<void> {
-  const tensor = new Float32Array(TENSOR_CHANNELS * TENSOR_SIZE);
-  for (let i = 0; i < TENSOR_SIZE; i++) {
-    tensor[i] = fixture.state[i] ?? 0;
-    tensor[TENSOR_SIZE + i] = fixture.mask[i] ?? 0;
-  }
-
-  const { policyLogits, value } = await predict(tensor);
-
-  for (let i = 0; i < fixture.expected_logits.length; i++) {
-    const expected = fixture.expected_logits[i] ?? 0;
-    const actual = policyLogits[i] ?? 0;
-    if (Math.abs(actual - expected) > tolerance) {
-      throw new Error(
-        `Fixture ${fixture.name}: logit[${i}] expected ${expected}, got ${actual}`,
-      );
-    }
-  }
-
-  if (Math.abs(value - fixture.expected_value) > tolerance) {
-    throw new Error(
-      `Fixture ${fixture.name}: value expected ${fixture.expected_value}, got ${value}`,
-    );
-  }
 }

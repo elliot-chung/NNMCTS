@@ -45,7 +45,6 @@ def build_parser():
   parser.add_argument("--policy-loss-weight", type=float, default=0.9, help="Weight for policy loss in training.")
   parser.add_argument("--val-split", type=float, default=0.2, help="Validation split for training.")
   parser.add_argument("--seed", type=int, default=0, help="Random seed for training.")
-  parser.add_argument("--log-every", type=int, default=10, help="Log every n epochs.")
   parser.add_argument("--augment-train", action="store_true", help="Augment training dataset.")
   parser.add_argument("--augment-val", action="store_true", help="Augment validation dataset.")
   parser.add_argument("--deduplicate-train", action="store_true", help="Deduplicate training dataset.")
@@ -122,7 +121,7 @@ def main():
           "Later rounds will use the newly trained model."
         )
 
-    summary = run_matches(
+    run_matches(
       game_type=args.game_type,
       num_games=args.games_per_round,
       player_one_type=player_one_type,
@@ -164,7 +163,6 @@ def main():
       policy_loss_weight=args.policy_loss_weight,
       val_split=args.val_split,
       seed=args.seed + offset,
-      log_every=args.log_every,
       augment_train=args.augment_train,
       augment_val=args.augment_val,
       deduplicate_train=args.deduplicate_train,

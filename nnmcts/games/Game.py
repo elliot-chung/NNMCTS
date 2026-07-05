@@ -1,29 +1,20 @@
-import weakref
 from abc import ABC, abstractmethod
 
 """
 Game Abstract Class
 
-This module defines an abstract class for a game as well as a list of weak references to all games that can be used to check how many games are still in memory.
+This module defines an abstract class for a game.
 
 This file contains:
-- ENV_LIST: A list of weak references to all games
-- clear_env_history(): Clears the ENV_LIST
-- check_env_history(): Collects the games still in memory
 - Game: An abstract class for a game
 
 """
-
-ENV_LIST = [] # History of all environments
 
 class Game(ABC):
   """
   Abstract class for a game
 
   This class defines the interface for a game. It handles the game logic and provides methods for interacting with the game.
-
-  Attributes:
-    ENV_LIST (list): A history of all games made since the last clear_env_history() call
 
   Methods:
     translate(move): Translates a move to a state index
@@ -39,9 +30,6 @@ class Game(ABC):
     __str__(): Returns a string representation of the game
     copy(): Returns a copy of the game
 """
-  def __init__(self):
-    ref = weakref.ref(self)
-    ENV_LIST.append(ref)
 
   # Translates a move to a state index
   # Moves can be represented as any type but the state array must be indexable by a single integer
@@ -117,17 +105,3 @@ class Game(ABC):
   @abstractmethod
   def copy(self):
     pass
-
-def clear_env_history():
-  ENV_LIST.clear()
-  
-def check_env_history():
-  num_env = len(ENV_LIST)
-  live = []
-  
-  for ref in ENV_LIST:
-    if ref() is not None:
-      live.append(ref)
-  
-  num_dead = num_env - len(live)
-  return num_dead, live

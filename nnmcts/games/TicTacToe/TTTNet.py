@@ -39,8 +39,6 @@ class TTTNet(torch.nn.Module):
 
     return p, v
 
-    return x
-
 # NeuralNode closure for building input
 def build_tensor(node):
   state = node.environment.get_canonical_state()

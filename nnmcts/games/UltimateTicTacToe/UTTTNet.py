@@ -27,8 +27,6 @@ class UTTTNet(torch.nn.Module):
     batch_size = x.shape[0]
     leading_dim = x.shape[:-1]
 
-    # mask = x[:, 1, :]
-
     x = x.view(*leading_dim, 3, 3, 3, 3)
     x = x.permute(*range(len(leading_dim)), -4, -2, -3, -1)
     x = x.contiguous()
@@ -60,8 +58,6 @@ class UTTTNet(torch.nn.Module):
     v = self.tanh(v)
 
     return p, v
-
-    return x
 
 # NeuralNode closure for building input
 def build_tensor(node):

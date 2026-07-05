@@ -443,7 +443,6 @@ This does not remove the CDK bootstrap stack (`CDKToolkit`).
 Before committing or making the repo public:
 
 ```powershell
-python scripts\strip_notebook_metadata.py MCTS.ipynb
 .\scripts\check_public_safety.ps1
 ```
 

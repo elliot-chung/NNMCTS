@@ -29,21 +29,6 @@ class Random_Player(Player):
       policy[self.environment.translate(move)] = 1 / len(self.environment.valid_moves())
     return action, policy
 
-class Human_Player(Player):
-  def __init__(self, environment, is_first=True):
-    super().__init__(environment, is_first)
-
-  def on_my_turn(self):
-    move = (-1, -1)
-    print("Valid Moves:", self.environment.valid_moves())
-    while not self.environment.is_valid(move):
-      action = input("Enter a move: ")
-      try:
-        move = eval(action)
-      except:
-        pass
-    return move, None
-
 from nnmcts.mcts.mcts import mcts
 from nnmcts.mcts.nodes import Node
 
