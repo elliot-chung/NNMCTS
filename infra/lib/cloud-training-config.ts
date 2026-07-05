@@ -26,6 +26,7 @@ export interface CloudTrainingConfig {
   timeouts: CloudTrainingTimeouts;
   gpuSmoke: TrainingProfile;
   gpu: TrainingProfile;
+  gpuAmiIds?: Record<string, string>;
 }
 
 const DEFAULT_CONFIG: CloudTrainingConfig = {
@@ -87,5 +88,6 @@ export function loadCloudTrainingConfig(configPath?: string): CloudTrainingConfi
     timeouts: mergeTimeouts(DEFAULT_CONFIG.timeouts, parsed.timeouts),
     gpuSmoke: mergeProfile(DEFAULT_CONFIG.gpuSmoke, gpuSmoke),
     gpu: mergeProfile(DEFAULT_CONFIG.gpu, parsed.gpu),
+    gpuAmiIds: parsed.gpuAmiIds,
   };
 }

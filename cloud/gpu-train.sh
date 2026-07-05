@@ -69,7 +69,11 @@ setup_cloudwatch_agent() {
   local instance_id="$1"
   echo "$(date -Is) Configuring CloudWatch agent for ${CLOUDWATCH_LOG_GROUP}/${instance_id}."
 
-  dnf install -y amazon-cloudwatch-agent
+  if [[ ! -x /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl ]]; then
+    dnf install -y amazon-cloudwatch-agent
+  else
+    echo "$(date -Is) CloudWatch agent already installed; skipping dnf install."
+  fi
   cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<EOF
 {
   "logs": {
@@ -97,7 +101,7 @@ EOF
 }
 
 INSTANCE_ID=$(imds_get "/latest/meta-data/instance-id")
-setup_cloudwatch_agent "${INSTANCE_ID}"
+( setup_cloudwatch_agent "${INSTANCE_ID}" >> /var/log/nnmcts-cloudwatch.log 2>&1 & )
 
 get_tag() {
   local key="$1"
@@ -125,21 +129,6 @@ get_required_tag() {
   done
   echo "$(date -Is) Required instance tag missing: ${key}"
   exit 1
-}
-
-setup_python_env() {
-  if [[ -f /opt/pytorch/bin/activate ]]; then
-    set +u
-    # shellcheck disable=SC1091
-    source /opt/pytorch/bin/activate
-    set -u
-    echo "$(date -Is) Using DLAMI PyTorch environment."
-    return 0
-  fi
-
-  echo "$(date -Is) DLAMI PyTorch environment not found; installing CUDA torch via pip."
-  python3 -m pip install --quiet --upgrade pip
-  python3 -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cu124
 }
 
 seconds_remaining() {
@@ -333,14 +322,20 @@ cd "${WORKDIR}"
 aws s3 cp "s3://${BUCKET}/${SOURCE_KEY}" source.zip
 require_time_remaining
 
-dnf install -y unzip
+if ! command -v unzip >/dev/null 2>&1; then
+  dnf install -y unzip
+fi
 unzip -qo source.zip -d repo
 cd repo
 require_time_remaining
 
-setup_python_env
-python -m pip install --quiet --upgrade pip
-python -m pip install --quiet numpy tqdm
+bash cloud/install-gpu-deps.sh
+if [[ -f /opt/pytorch/bin/activate ]]; then
+  set +u
+  # shellcheck disable=SC1091
+  source /opt/pytorch/bin/activate
+  set -u
+fi
 require_time_remaining
 
 export PYTHONPATH="${WORKDIR}/repo"

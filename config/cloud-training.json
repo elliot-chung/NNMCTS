@@ -1,4 +1,7 @@
 {
+  "gpuAmiIds": {
+    "us-west-1": "ami-0b2f6fd4ed32fc52d"
+  },
   "timeouts": {
     "maxInstanceSeconds": 90000,
     "maxTrainingSeconds": 90000,

@@ -17,6 +17,10 @@ const trainingConfig = loadCloudTrainingConfig(
 const gpuUserData = fs.readFileSync(path.join(currentDir, "../../cloud/gpu-train.sh"), "utf8");
 const gpuLogGroupName = "/nnmcts/gpu-training";
 
+const BASE_GPU_AMI_IDS: Record<string, string> = {
+  "us-west-1": "ami-0b2f6fd4ed32fc52d",
+};
+
 export class NnmctsPipelineStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -93,8 +97,10 @@ export class NnmctsPipelineStack extends cdk.Stack {
       roles: [gpuInstanceRole.roleName],
     });
 
+    const gpuAmiId =
+      trainingConfig.gpuAmiIds?.[this.region] ?? BASE_GPU_AMI_IDS[this.region] ?? BASE_GPU_AMI_IDS["us-west-1"];
     const gpuAmi = ec2.MachineImage.genericLinux({
-      "us-west-1": "ami-0b2f6fd4ed32fc52d",
+      [this.region]: gpuAmiId,
     });
 
     const gpuLaunchTemplate = new ec2.CfnLaunchTemplate(this, "GpuTrainingLaunchTemplate", {
