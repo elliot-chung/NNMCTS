@@ -125,6 +125,18 @@ def save_model_checkpoint(
   torch.save(payload, path)
 
 
+_MODEL_CACHE: dict[tuple[str, str, str], torch.nn.Module] = {}
+
+
+def get_cached_model(game_type: str, model_path: str, device: str) -> torch.nn.Module:
+  key = (normalize_game_type(game_type), str(Path(model_path).resolve()), device)
+  if key not in _MODEL_CACHE:
+    model, _ = build_model(game_type, checkpoint_path=model_path, device=device)
+    model.eval()
+    _MODEL_CACHE[key] = model
+  return _MODEL_CACHE[key]
+
+
 class ScriptNeuralMCTSPlayer(Player):
   def __init__(
     self,
@@ -153,6 +165,28 @@ class ScriptNeuralMCTSPlayer(Player):
     return node.action, policy
 
 
+def create_nmcts_player(
+  environment,
+  game_type: str,
+  is_first: bool,
+  iter_count: int,
+  model: torch.nn.Module,
+  player_name: str,
+  show_mcts_timing: bool = False,
+) -> Player:
+  spec = get_game_spec(game_type)
+  return ScriptNeuralMCTSPlayer(
+    environment,
+    is_first,
+    iter_count,
+    model,
+    spec.build_tensor,
+    player_name,
+    uses_mask=spec.uses_mask,
+    show_mcts_timing=show_mcts_timing,
+  )
+
+
 def create_player(
   environment,
   game_type: str,
@@ -176,17 +210,14 @@ def create_player(
     required_arg = model_arg_name or f"--{player_name.replace('_', '-')}-model"
     raise ValueError(f"{player_name} requires {required_arg} when using nmcts")
 
-  spec = get_game_spec(game_type)
-  model, _ = build_model(game_type, checkpoint_path=model_path, device=device)
-  model.eval()
-  return ScriptNeuralMCTSPlayer(
+  model = get_cached_model(game_type, model_path, device)
+  return create_nmcts_player(
     environment,
+    game_type,
     is_first,
     iter_count,
     model,
-    spec.build_tensor,
     player_name,
-    uses_mask=spec.uses_mask,
     show_mcts_timing=show_mcts_timing,
   )
 
