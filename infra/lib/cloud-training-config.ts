@@ -11,6 +11,8 @@ export interface TrainingProfile {
   player1Type: string;
   player2Type: string;
   selfPlayWorkers?: number;
+  playDevice?: string;
+  trainDevice?: string;
 }
 
 export interface CloudTrainingTimeouts {
@@ -43,6 +45,8 @@ const DEFAULT_CONFIG: CloudTrainingConfig = {
     player1Type: "mcts",
     player2Type: "mcts",
     selfPlayWorkers: 1,
+    playDevice: "cpu",
+    trainDevice: "cuda",
   },
   gpu: {
     gameType: "UTTT",
@@ -54,6 +58,8 @@ const DEFAULT_CONFIG: CloudTrainingConfig = {
     player1Type: "nmcts",
     player2Type: "nmcts",
     selfPlayWorkers: 3,
+    playDevice: "cpu",
+    trainDevice: "cuda",
   },
 };
 

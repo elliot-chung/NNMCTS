@@ -14,6 +14,8 @@ readonly DEFAULT_MCTS_ITERS=75
 readonly DEFAULT_PLAYER1_TYPE=nmcts
 readonly DEFAULT_PLAYER2_TYPE=nmcts
 readonly DEFAULT_SELF_PLAY_WORKERS=3
+readonly DEFAULT_PLAY_DEVICE=cpu
+readonly DEFAULT_TRAIN_DEVICE=cuda
 
 START_TIME=$(date +%s)
 BUCKET=""
@@ -160,10 +162,14 @@ checkpoints = sorted(pathlib.Path('${OUTPUT_DIR}/checkpoints').glob('*.pt'))
 manifest = {
     'run_id': '${RUN_ID}',
     'game_type': '${GAME_TYPE}',
-    'device': 'cuda',
+    'play_device': '${PLAY_DEVICE}',
+    'train_device': '${TRAIN_DEVICE}',
+    'device': '${TRAIN_DEVICE}',
     'rounds': int('${ROUNDS}'),
     'games_per_round': int('${GAMES_PER_ROUND}'),
     'epochs': int('${EPOCHS}'),
+    'initial_checkpoint_name': '${INITIAL_CHECKPOINT_NAME}' or None,
+    'start_round': int('${START_ROUND}') if '${START_ROUND}' else None,
     'latest_checkpoint': checkpoints[-1].name if checkpoints else None,
     'status': '${status}',
     'phase': '${phase}',
@@ -195,6 +201,10 @@ run_training_phase() {
   local player1_type="$9"
   local player2_type="${10}"
   local self_play_workers="${11}"
+  local play_device="${12}"
+  local train_device="${13}"
+  local initial_checkpoint="${14:-}"
+  local start_round="${15:-1}"
 
   local limit
   limit=$(training_limit "${requested_seconds}")
@@ -203,25 +213,38 @@ run_training_phase() {
     return 1
   fi
 
-  echo "$(date -Is) Starting ${phase} on ${game_type} (limit ${limit}s, workers ${self_play_workers})."
+  local resume_msg=""
+  if [[ -n "${initial_checkpoint}" ]]; then
+    resume_msg=", resume ${initial_checkpoint} from round ${start_round}"
+  fi
+
+  echo "$(date -Is) Starting ${phase} on ${game_type} (limit ${limit}s, workers ${self_play_workers}, play ${play_device}, train ${train_device}${resume_msg})."
   set +e
-  timeout "${limit}" python run_pipeline.py \
-    --game-type "${game_type}" \
-    --rounds "${rounds}" \
-    --games-per-round "${games_per_round}" \
-    --output-dir "${OUTPUT_DIR}" \
-    --device cuda \
-    --player1-type "${player1_type}" \
-    --player2-type "${player2_type}" \
-    --player1-iters "${mcts_iters}" \
-    --player2-iters "${mcts_iters}" \
-    --epochs "${epochs}" \
-    --batch-size "${batch_size}" \
-    --self-play-workers "${self_play_workers}" \
-    --batched-inference \
-    --amp \
-    --augment-train \
+  local -a pipeline_args=(
+    --game-type "${game_type}"
+    --rounds "${rounds}"
+    --games-per-round "${games_per_round}"
+    --output-dir "${OUTPUT_DIR}"
+    --play-device "${play_device}"
+    --train-device "${train_device}"
+    --player1-type "${player1_type}"
+    --player2-type "${player2_type}"
+    --player1-iters "${mcts_iters}"
+    --player2-iters "${mcts_iters}"
+    --epochs "${epochs}"
+    --batch-size "${batch_size}"
+    --self-play-workers "${self_play_workers}"
+    --batched-inference
+    --amp
+    --augment-train
     --deduplicate-train
+  )
+  if [[ -n "${initial_checkpoint}" ]]; then
+    pipeline_args+=(--initial-checkpoint "${initial_checkpoint}")
+    pipeline_args+=(--start-round "${start_round}")
+  fi
+
+  timeout "${limit}" python run_pipeline.py "${pipeline_args[@]}"
   local train_exit=$?
   set -e
 
@@ -236,6 +259,44 @@ run_training_phase() {
 
   echo "$(date -Is) ${phase} completed successfully."
   return 0
+}
+
+install_bundled_checkpoint() {
+  if [[ -z "${INITIAL_CHECKPOINT_NAME}" ]]; then
+    return 0
+  fi
+
+  local bundled="${WORKDIR}/repo/bundled-checkpoint/${INITIAL_CHECKPOINT_NAME}"
+  local dest="${OUTPUT_DIR}/checkpoints/${INITIAL_CHECKPOINT_NAME}"
+  if [[ ! -f "${bundled}" ]]; then
+    echo "$(date -Is) Bundled checkpoint not found: ${bundled}"
+    exit 1
+  fi
+
+  echo "$(date -Is) Installing bundled checkpoint ${INITIAL_CHECKPOINT_NAME}"
+  cp "${bundled}" "${dest}"
+  INITIAL_CHECKPOINT="${dest}"
+}
+
+parse_start_round_from_checkpoint() {
+  local name="$1"
+  if [[ "${name}" =~ round_([0-9]+)\.pt ]]; then
+    echo $((10#${BASH_REMATCH[1]} + 1))
+  else
+    echo 1
+  fi
+}
+
+resolve_start_round() {
+  if [[ -n "${START_ROUND_TAG}" ]]; then
+    echo "${START_ROUND_TAG}"
+    return
+  fi
+  if [[ -n "${INITIAL_CHECKPOINT_NAME}" ]]; then
+    parse_start_round_from_checkpoint "${INITIAL_CHECKPOINT_NAME}"
+    return
+  fi
+  echo 1
 }
 
 REGION=$(imds_get "/latest/meta-data/placement/region")
@@ -253,13 +314,19 @@ MCTS_ITERS=$(get_tag "nnmcts-mcts-iters" "${DEFAULT_MCTS_ITERS}")
 PLAYER1_TYPE=$(get_tag "nnmcts-player1-type" "${DEFAULT_PLAYER1_TYPE}")
 PLAYER2_TYPE=$(get_tag "nnmcts-player2-type" "${DEFAULT_PLAYER2_TYPE}")
 SELF_PLAY_WORKERS=$(get_tag "nnmcts-self-play-workers" "${DEFAULT_SELF_PLAY_WORKERS}")
+PLAY_DEVICE=$(get_tag "nnmcts-play-device" "${DEFAULT_PLAY_DEVICE}")
+TRAIN_DEVICE=$(get_tag "nnmcts-train-device" "${DEFAULT_TRAIN_DEVICE}")
+INITIAL_CHECKPOINT_NAME=$(get_tag "nnmcts-initial-checkpoint-name" "")
+START_ROUND_TAG=$(get_tag "nnmcts-start-round" "")
+INITIAL_CHECKPOINT=""
+START_ROUND=1
 RUN_SMOKE=$(get_tag "nnmcts-run-smoke" "false")
 
 export AWS_DEFAULT_REGION="${REGION}"
 WORKDIR=/opt/nnmcts
 OUTPUT_DIR="${WORKDIR}/output"
 
-echo "$(date -Is) GPU training bootstrap: run_id=${RUN_ID} bucket=${BUCKET} source_key=${SOURCE_KEY} region=${REGION} run_smoke=${RUN_SMOKE}"
+echo "$(date -Is) GPU training bootstrap: run_id=${RUN_ID} bucket=${BUCKET} source_key=${SOURCE_KEY} region=${REGION} run_smoke=${RUN_SMOKE} checkpoint=${INITIAL_CHECKPOINT_NAME:-none}"
 
 mkdir -p "${WORKDIR}"
 cd "${WORKDIR}"
@@ -293,6 +360,8 @@ if [[ "${RUN_SMOKE}" == "true" ]]; then
   SMOKE_PLAYER1_TYPE=$(get_tag "nnmcts-smoke-player1-type" "mcts")
   SMOKE_PLAYER2_TYPE=$(get_tag "nnmcts-smoke-player2-type" "mcts")
   SMOKE_SELF_PLAY_WORKERS=$(get_tag "nnmcts-smoke-self-play-workers" "1")
+  SMOKE_PLAY_DEVICE=$(get_tag "nnmcts-smoke-play-device" "${PLAY_DEVICE}")
+  SMOKE_TRAIN_DEVICE=$(get_tag "nnmcts-smoke-train-device" "${TRAIN_DEVICE}")
   SMOKE_MAX_TRAINING_SECONDS=$(get_tag "nnmcts-smoke-max-training-seconds" "600")
 
   if ! run_training_phase \
@@ -306,7 +375,9 @@ if [[ "${RUN_SMOKE}" == "true" ]]; then
     "${SMOKE_MCTS_ITERS}" \
     "${SMOKE_PLAYER1_TYPE}" \
     "${SMOKE_PLAYER2_TYPE}" \
-    "${SMOKE_SELF_PLAY_WORKERS}"; then
+    "${SMOKE_SELF_PLAY_WORKERS}" \
+    "${SMOKE_PLAY_DEVICE}" \
+    "${SMOKE_TRAIN_DEVICE}"; then
     upload_artifacts "failed"
     exit 1
   fi
@@ -315,6 +386,9 @@ if [[ "${RUN_SMOKE}" == "true" ]]; then
   mkdir -p "${OUTPUT_DIR}/datasets" "${OUTPUT_DIR}/checkpoints"
   require_time_remaining
 fi
+
+install_bundled_checkpoint
+START_ROUND=$(resolve_start_round)
 
 if ! run_training_phase \
   "training" \
@@ -327,7 +401,11 @@ if ! run_training_phase \
   "${MCTS_ITERS}" \
   "${PLAYER1_TYPE}" \
   "${PLAYER2_TYPE}" \
-  "${SELF_PLAY_WORKERS}"; then
+  "${SELF_PLAY_WORKERS}" \
+  "${PLAY_DEVICE}" \
+  "${TRAIN_DEVICE}" \
+  "${INITIAL_CHECKPOINT}" \
+  "${START_ROUND}"; then
   train_exit=$?
   if [[ $train_exit -eq 124 ]]; then
     upload_artifacts "timed_out"

@@ -14,17 +14,21 @@
     "mctsIters": 10,
     "player1Type": "mcts",
     "player2Type": "mcts",
-    "selfPlayWorkers": 1
+    "selfPlayWorkers": 1,
+    "playDevice": "cpu",
+    "trainDevice": "cuda"
   },
   "gpu": {
     "gameType": "UTTT",
-    "rounds": 20,
-    "gamesPerRound": 20,
-    "epochs": 20,
+    "rounds": 50,
+    "gamesPerRound": 100,
+    "epochs": 100,
     "batchSize": 128,
-    "mctsIters": 50,
+    "mctsIters": 100,
     "player1Type": "nmcts",
     "player2Type": "nmcts",
-    "selfPlayWorkers": 3
+    "selfPlayWorkers": 4,
+    "playDevice": "cpu",
+    "trainDevice": "cuda"
   }
 }

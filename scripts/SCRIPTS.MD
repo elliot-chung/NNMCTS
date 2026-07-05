@@ -8,7 +8,7 @@ For local training without AWS, use the top-level entry points (`run_pipeline.py
 
 | Category | Scripts | Purpose |
 |----------|---------|---------|
-| AWS cloud pipeline | `run_cloud_pipeline.ps1`, `run_gpu_training.ps1`, `check_gpu_training.ps1`, `teardown_cloud_pipeline.ps1` | Deploy infrastructure, launch GPU training on EC2, monitor runs, tear down |
+| AWS cloud pipeline | `run_cloud_pipeline.ps1`, `run_gpu_training.ps1`, `resume_gpu_training.ps1`, `check_gpu_training.ps1`, `teardown_cloud_pipeline.ps1` | Deploy infrastructure, launch GPU training on EC2, resume from a local checkpoint, monitor runs, tear down |
 | Source packaging | `package_source.ps1`, `package_source.py` | Zip the repo (excluding checkpoints, `node_modules`, etc.) for S3 upload |
 | Model → demo | `download_checkpoint.ps1`, `export_onnx.py`, `validate_onnx.py`, `generate_uttt_fixtures.py` | Pull a trained checkpoint, export ONNX for the browser demo, validate parity, regenerate test fixtures |
 | Development | `benchmark_selfplay.py` | Measure self-play throughput and MCTS timing |
@@ -49,7 +49,7 @@ Copy-Item config\local.example.json config\local.json
 
 `config/local.json` is gitignored. Alternatively set `AWS_PROFILE` and `AWS_REGION` in your environment. Resolution order: script `-Profile`/`-Region` flags → environment variables → `config/local.json` → defaults (`default`, `us-west-1`, `NnmctsPipelineStack`).
 
-Training hyperparameters and timeouts live in [`config/cloud-training.json`](../config/cloud-training.json). See the main README for field descriptions and per-run override flags.
+Training hyperparameters and timeouts live in [`config/cloud-training.json`](../config/cloud-training.json). See the main README for field descriptions and per-run override flags. Cloud GPU runs default to **CPU self-play** (`playDevice`) and **GPU training/inference** (`trainDevice`); batched inference is enabled automatically when those differ and NMCTS players are used.
 
 ### Demo app (after exporting ONNX)
 
@@ -80,7 +80,33 @@ npm run dev
 
 4. Checkpoints land in S3 under `s3://<artifacts-bucket>/runs/<run-id>/checkpoints/`. Run metadata is saved locally to `artifacts/latest-gpu-run.json`.
 
-### 2. Checkpoint → browser demo
+### 2. Resume GPU training from a local checkpoint
+
+Bundle a local `.pt` checkpoint into the source zip, launch EC2, and continue the pipeline from that weights file. The checkpoint is copied into the instance at `bundled-checkpoint/<filename>` and installed before training starts. Round numbering continues from the checkpoint name (e.g. `round_020.pt` → next checkpoint is `round_021.pt`) unless you pass `-StartRound`.
+
+Smoke tests are skipped automatically when a checkpoint is provided.
+
+```powershell
+# Convenience wrapper (requires -InitialCheckpointPath)
+.\scripts\resume_gpu_training.ps1 `
+  -InitialCheckpointPath artifacts\gpu-20260701-192839\round_020.pt `
+  -Wait
+
+# Equivalent via run_gpu_training.ps1
+.\scripts\run_gpu_training.ps1 `
+  -InitialCheckpointPath artifacts\gpu-20260701-192839\round_020.pt `
+  -Rounds 10 `
+  -Wait
+
+# Via the full pipeline wrapper (smoke is skipped when -InitialCheckpointPath is set)
+.\scripts\run_cloud_pipeline.ps1 -RunOnly `
+  -InitialCheckpointPath artifacts\gpu-20260701-192839\round_020.pt `
+  -Wait
+```
+
+Typical flow: download a checkpoint locally with `download_checkpoint.ps1`, then launch a resume run pointing at that file.
+
+### 3. Checkpoint → browser demo
 
 After training (or using a published checkpoint):
 
@@ -104,7 +130,7 @@ npm run dev
 
 Replace `<run-id>` with your actual run ID (e.g. `gpu-20260702-140754`). If `download_checkpoint.ps1` succeeded, the checkpoint path is `artifacts\<run-id>\<CheckpointName>` (default `round_020.pt`).
 
-### 3. Tear down AWS resources
+### 4. Tear down AWS resources
 
 ```powershell
 # Interactive confirmation
@@ -119,7 +145,7 @@ Replace `<run-id>` with your actual run ID (e.g. `gpu-20260702-140754`). If `dow
 
 This does not remove the CDK bootstrap stack (`CDKToolkit`).
 
-### 4. Before publishing the repo
+### 5. Before publishing the repo
 
 ```powershell
 .\scripts\check_public_safety.ps1
@@ -149,6 +175,8 @@ Orchestrates CDK deploy and GPU training. By default: bootstrap CDK (if needed),
 | `-Wait` | Block until manifest appears in S3 (default for full pipeline) |
 | `-ConfigPath` | Alternate path to `cloud-training.json` |
 | `-GameType`, `-Rounds`, `-GamesPerRound`, `-Epochs`, `-BatchSize`, `-MctsIters`, `-Player1Type`, `-Player2Type`, `-SelfPlayWorkers` | Per-run training overrides |
+| `-InitialCheckpointPath` | Local `.pt` checkpoint to bundle with source and use as `--initial-checkpoint` on the instance (skips smoke) |
+| `-StartRound` | First pipeline round number on the instance (default: one past the round encoded in the checkpoint filename) |
 | `-MaxTrainingSeconds`, `-MaxInstanceSeconds` | Timeout overrides (full GPU only) |
 
 **Examples:**
@@ -165,7 +193,15 @@ Orchestrates CDK deploy and GPU training. By default: bootstrap CDK (if needed),
 
 # Full training only, custom round count
 .\scripts\run_cloud_pipeline.ps1 -SkipSmoke -Rounds 10 -MaxTrainingSeconds 7200
+
+# Resume from a local checkpoint (smoke skipped)
+.\scripts\run_cloud_pipeline.ps1 -RunOnly `
+  -InitialCheckpointPath artifacts\gpu-20260701-192839\round_020.pt `
+  -Rounds 10 `
+  -Wait
 ```
+
+Device split (`playDevice` / `trainDevice`) is configured in `config/cloud-training.json`, not via this script's CLI flags.
 
 ---
 
@@ -180,6 +216,8 @@ Launches a single on-demand `g4dn.xlarge` GPU instance without going through the
 | `-TrainingProfile` | `gpuSmoke` or `gpu` (default `gpu`) |
 | `-SmokeThenTrain` | Run smoke then full training on the same instance (used internally by `run_cloud_pipeline.ps1`) |
 | `-Wait` | Block until manifest appears |
+| `-InitialCheckpointPath` | Local `.pt` file to bundle into the source zip and use as the starting checkpoint (skips smoke) |
+| `-StartRound` | First pipeline round number (default: inferred from checkpoint filename) |
 | Other flags | Same AWS and training overrides as `run_cloud_pipeline.ps1` |
 
 **Examples:**
@@ -193,15 +231,47 @@ Launches a single on-demand `g4dn.xlarge` GPU instance without going through the
 
 # Custom training run
 .\scripts\run_gpu_training.ps1 -Rounds 10 -MaxTrainingSeconds 7200
+
+# Continue training from a local checkpoint
+.\scripts\run_gpu_training.ps1 `
+  -InitialCheckpointPath artifacts\my-run\round_020.pt `
+  -Rounds 10 `
+  -Wait
 ```
 
-Live logs stream to CloudWatch log group `/nnmcts/gpu-training` (one stream per instance ID). A full log archive is uploaded to `s3://<bucket>/runs/<run-id>/gpu-train.log` when the run completes.
+Resume runs use run ID prefix `gpu-resume-`. When `-InitialCheckpointPath` is set, the checkpoint is embedded at `bundled-checkpoint/<filename>` inside the uploaded source zip.
+
+---
+
+### `resume_gpu_training.ps1`
+
+Convenience wrapper around `run_gpu_training.ps1` for continuing training from a local checkpoint. Equivalent to `run_gpu_training.ps1 -TrainingProfile gpu -InitialCheckpointPath ...` with smoke skipped.
+
+**When to use:** After downloading a checkpoint locally, or when you already have a `.pt` file on disk and want a one-flag launch.
+
+| Parameter | Description |
+|-----------|-------------|
+| `-InitialCheckpointPath` | **Required.** Path to a local `.pt` checkpoint |
+| `-StartRound` | Optional first round number (default: inferred from filename, e.g. `round_020.pt` → round 21) |
+| `-Rounds`, `-GamesPerRound`, `-Epochs`, etc. | Same training overrides as `run_gpu_training.ps1` |
+| `-Wait` | Block until manifest appears |
+
+**Example:**
+
+```powershell
+.\scripts\resume_gpu_training.ps1 `
+  -InitialCheckpointPath artifacts\gpu-20260701-192839\round_020.pt `
+  -Rounds 10 `
+  -Wait
+```
 
 ---
 
 ### `check_gpu_training.ps1`
 
 Shows status for the latest GPU run: instance state, S3 manifest, checkpoint listing, and recent CloudWatch log events.
+
+Live logs stream to CloudWatch log group `/nnmcts/gpu-training` (one stream per instance ID). A full log archive is uploaded to `s3://<bucket>/runs/<run-id>/gpu-train.log` when the run completes.
 
 **When to use:** After launching training without `-Wait`, or to inspect a run in progress.
 
@@ -234,22 +304,31 @@ Terminates tagged GPU training instances, destroys the CloudFormation stack via 
 | `-KeepArtifacts` | Destroy stack and instances but retain the S3 bucket |
 | `-Profile`, `-Region`, `-StackName` | AWS config overrides |
 
-**Examples:** See [Recommended workflows §3](#3-tear-down-aws-resources).
+**Examples:** See [Recommended workflows §4](#4-tear-down-aws-resources).
 
 ---
 
 ### `package_source.ps1` / `package_source.py`
 
-Creates a zip of the repository for upload to S3, excluding `.git`, virtualenvs, `node_modules`, `cdk.out`, checkpoints (`.pt`, `.pkl`), and similar paths.
+Creates a zip of the repository for upload to S3, excluding `.git`, virtualenvs, `node_modules`, `cdk.out`, checkpoints (`.pt`, `.pkl`), and similar paths. Optionally bundles one checkpoint file at `bundled-checkpoint/<filename>` inside the archive.
 
-**When to use:** Rarely invoked directly; `run_gpu_training.ps1` calls `package_source.ps1` automatically. Useful for debugging packaging or manual uploads.
+**When to use:** Rarely invoked directly; `run_gpu_training.ps1` calls `package_source.ps1` automatically (with `-CheckpointPath` when resuming). Useful for debugging packaging or manual uploads.
+
+| Parameter | Description |
+|-----------|-------------|
+| `-RepoRoot` | Repository root to zip (default: parent of `scripts/`) |
+| `-OutputPath` | Output zip path (default: `$env:TEMP\nnmcts-source.zip`) |
+| `-CheckpointPath` | Optional local `.pt` file to include at `bundled-checkpoint/<filename>` |
 
 ```powershell
 # Default output: $env:TEMP\nnmcts-source.zip
 .\scripts\package_source.ps1
 
+# Bundle a checkpoint with the source
+.\scripts\package_source.ps1 -CheckpointPath artifacts\my-run\round_020.pt
+
 # Custom paths
-python scripts\package_source.py --repo-root . --output dist\nnmcts-source.zip
+python scripts\package_source.py --repo-root . --output dist\nnmcts-source.zip --checkpoint artifacts\my-run\round_020.pt
 ```
 
 ---
@@ -432,6 +511,8 @@ Exit code `0` = clean, `1` = potential issues listed to stdout.
 | Instance ends without manifest | Bootstrap or training error | `.\scripts\check_gpu_training.ps1 -LogLines 200`; check `s3://<bucket>/runs/<run-id>/gpu-train.log` |
 | GPU launch fails | Quota or wrong region | Request **Running On-Demand G and VT instances** quota; GPU AMI is pinned for `us-west-1` in CDK (see main README) |
 | Wrong AWS account/region | Config mismatch | Verify `config/local.json`, `$env:AWS_PROFILE`, `$env:AWS_REGION` |
+| `Initial checkpoint not found` on launch | Bad `-InitialCheckpointPath` | Use a local path to an existing `.pt` file; download first with `download_checkpoint.ps1` if needed |
+| Resume run overwrites low round numbers | Expected without `-StartRound` | Pass `-StartRound` explicitly, or name checkpoint `round_NNN.pt` so the next round is inferred |
 
 ### Checkpoint download and ONNX export
 
@@ -461,4 +542,4 @@ The scan may flag legitimate-looking 12-digit numbers or example bucket names em
 - [Main README](../README.md) — project overview, local training, AWS setup, `cloud-training.json` reference
 - [demo/README.md](../demo/README.md) — Next.js demo and ONNX model notes
 - [config/local.example.json](../config/local.example.json) — AWS profile/region template
-- [config/cloud-training.json](../config/cloud-training.json) — GPU smoke and training defaults
+- [config/cloud-training.json](../config/cloud-training.json) — GPU smoke and training defaults (`playDevice`, `trainDevice`, rounds, workers, etc.)

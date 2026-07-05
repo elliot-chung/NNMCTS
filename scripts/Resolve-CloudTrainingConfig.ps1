@@ -12,6 +12,8 @@ function Resolve-CloudTrainingConfig {
     [string]$Player1Type,
     [string]$Player2Type,
     [int]$SelfPlayWorkers = 0,
+    [string]$PlayDevice,
+    [string]$TrainDevice,
     [int]$MaxTrainingSeconds = 0,
     [int]$MaxInstanceSeconds = 0
   )
@@ -48,6 +50,8 @@ function Resolve-CloudTrainingConfig {
     Player1Type = if ($Player1Type) { $Player1Type } else { $training.player1Type }
     Player2Type = if ($Player2Type) { $Player2Type } else { $training.player2Type }
     SelfPlayWorkers = if ($SelfPlayWorkers -gt 0) { $SelfPlayWorkers } elseif ($training.PSObject.Properties.Name -contains "selfPlayWorkers") { [int]$training.selfPlayWorkers } else { 1 }
+    PlayDevice = if ($PlayDevice) { $PlayDevice } elseif ($training.PSObject.Properties.Name -contains "playDevice") { [string]$training.playDevice } else { "cpu" }
+    TrainDevice = if ($TrainDevice) { $TrainDevice } elseif ($training.PSObject.Properties.Name -contains "trainDevice") { [string]$training.trainDevice } else { "cuda" }
     MaxTrainingSeconds = if ($MaxTrainingSeconds -gt 0) { $MaxTrainingSeconds } else { $defaultMaxTrainingSeconds }
     MaxInstanceSeconds = if ($MaxInstanceSeconds -gt 0) { $MaxInstanceSeconds } else { $defaultMaxInstanceSeconds }
     ConfigPath = $ConfigPath
@@ -74,6 +78,8 @@ function Add-TrainingConfigTags {
   $Tags.Add(@{ Key = "nnmcts-${tagPrefix}player1-type"; Value = [string]$TrainingConfig.Player1Type }) | Out-Null
   $Tags.Add(@{ Key = "nnmcts-${tagPrefix}player2-type"; Value = [string]$TrainingConfig.Player2Type }) | Out-Null
   $Tags.Add(@{ Key = "nnmcts-${tagPrefix}self-play-workers"; Value = [string]$TrainingConfig.SelfPlayWorkers }) | Out-Null
+  $Tags.Add(@{ Key = "nnmcts-${tagPrefix}play-device"; Value = [string]$TrainingConfig.PlayDevice }) | Out-Null
+  $Tags.Add(@{ Key = "nnmcts-${tagPrefix}train-device"; Value = [string]$TrainingConfig.TrainDevice }) | Out-Null
   if ($Prefix) {
     $Tags.Add(@{ Key = "nnmcts-${tagPrefix}max-training-seconds"; Value = [string]$TrainingConfig.MaxTrainingSeconds }) | Out-Null
   }
@@ -86,7 +92,9 @@ function New-GpuTrainingTags {
     [string]$SourceKey,
     [string]$RunId,
     [string]$RunType = "training",
-    [hashtable]$SmokeConfig
+    [hashtable]$SmokeConfig,
+    [string]$InitialCheckpointName,
+    [int]$StartRound = 0
   )
 
   $tags = [System.Collections.Generic.List[object]]::new()
@@ -97,6 +105,13 @@ function New-GpuTrainingTags {
   $tags.Add(@{ Key = "nnmcts-run-type"; Value = $RunType }) | Out-Null
   $tags.Add(@{ Key = "nnmcts-max-training-seconds"; Value = [string]$TrainingConfig.MaxTrainingSeconds }) | Out-Null
   $tags.Add(@{ Key = "nnmcts-max-instance-seconds"; Value = [string]$TrainingConfig.MaxInstanceSeconds }) | Out-Null
+
+  if ($InitialCheckpointName) {
+    $tags.Add(@{ Key = "nnmcts-initial-checkpoint-name"; Value = [string]$InitialCheckpointName }) | Out-Null
+  }
+  if ($StartRound -gt 0) {
+    $tags.Add(@{ Key = "nnmcts-start-round"; Value = [string]$StartRound }) | Out-Null
+  }
 
   if ($SmokeConfig) {
     $tags.Add(@{ Key = "nnmcts-run-smoke"; Value = "true" }) | Out-Null

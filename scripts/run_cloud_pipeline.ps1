@@ -15,6 +15,8 @@ param(
   [string]$Player1Type,
   [string]$Player2Type,
   [int]$SelfPlayWorkers = 0,
+  [string]$InitialCheckpointPath,
+  [int]$StartRound = 0,
   [int]$MaxTrainingSeconds = 0,
   [int]$MaxInstanceSeconds = 0,
   [switch]$Wait
@@ -85,6 +87,8 @@ $launchArgs = @{
   Player1Type = $Player1Type
   Player2Type = $Player2Type
   SelfPlayWorkers = $SelfPlayWorkers
+  InitialCheckpointPath = $InitialCheckpointPath
+  StartRound = $StartRound
   MaxTrainingSeconds = $MaxTrainingSeconds
   MaxInstanceSeconds = $MaxInstanceSeconds
   Wait = $Wait.IsPresent

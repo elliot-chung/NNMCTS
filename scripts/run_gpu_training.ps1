@@ -15,6 +15,8 @@ param(
   [string]$Player1Type,
   [string]$Player2Type,
   [int]$SelfPlayWorkers = 0,
+  [string]$InitialCheckpointPath,
+  [int]$StartRound = 0,
   [int]$MaxTrainingSeconds = 0,
   [int]$MaxInstanceSeconds = 0,
   [switch]$Wait
@@ -31,7 +33,18 @@ $trainingConfig = Resolve-CloudTrainingConfig -Profile $TrainingProfile -ConfigP
 
 $smokeConfig = $null
 if ($SmokeThenTrain) {
-  $smokeConfig = Resolve-CloudTrainingConfig -Profile gpuSmoke -ConfigPath $ConfigPath -GameType $GameType
+  if ($InitialCheckpointPath) {
+    Write-Warning "Initial checkpoint provided; skipping smoke test."
+    $SmokeThenTrain = $false
+  }
+  else {
+    $smokeConfig = Resolve-CloudTrainingConfig -Profile gpuSmoke -ConfigPath $ConfigPath -GameType $GameType
+    $TrainingProfile = "gpu"
+  }
+}
+
+if ($InitialCheckpointPath -and $TrainingProfile -eq "gpuSmoke") {
+  Write-Warning "Initial checkpoint provided; using full GPU training profile instead of smoke."
   $TrainingProfile = "gpu"
 }
 
@@ -159,7 +172,21 @@ if (-not (Test-StackExists)) {
 $bucket = Require-StackOutput -Key "ArtifactsBucketName"
 $launchTemplate = Require-StackOutput -Key "GpuLaunchTemplateName"
 $logGroupName = Require-StackOutput -Key "GpuTrainingLogGroupName"
-$runPrefix = if ($TrainingProfile -eq "gpuSmoke") { "gpu-smoke" } else { "gpu" }
+
+$initialCheckpointName = $null
+$resolvedInitialCheckpointPath = $null
+if ($InitialCheckpointPath) {
+  if (-not (Test-Path -LiteralPath $InitialCheckpointPath)) {
+    throw "Initial checkpoint not found: $InitialCheckpointPath"
+  }
+  $resolvedInitialCheckpointPath = (Resolve-Path -LiteralPath $InitialCheckpointPath).Path
+  $initialCheckpointName = [IO.Path]::GetFileName($resolvedInitialCheckpointPath)
+  if ($initialCheckpointName -notlike "*.pt") {
+    throw "Initial checkpoint must be a .pt file: $resolvedInitialCheckpointPath"
+  }
+}
+
+$runPrefix = if ($TrainingProfile -eq "gpuSmoke") { "gpu-smoke" } elseif ($initialCheckpointName) { "gpu-resume" } else { "gpu" }
 $runId = "$runPrefix-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 $sourceKey = "source/nnmcts-$runId.zip"
 $launchedAt = (Get-Date).ToString("o")
@@ -167,7 +194,11 @@ $runType = if ($SmokeThenTrain) { "pipeline" } elseif ($TrainingProfile -eq "gpu
 $runLabel = if ($SmokeThenTrain) { "GPU pipeline (smoke + training)" } elseif ($TrainingProfile -eq "gpuSmoke") { "GPU smoke test" } else { "GPU training" }
 
 Write-Host "Packaging source..."
-$zipPath = & (Join-Path $PSScriptRoot "package_source.ps1")
+$packageArgs = @{}
+if ($resolvedInitialCheckpointPath) {
+  $packageArgs.CheckpointPath = $resolvedInitialCheckpointPath
+}
+$zipPath = & (Join-Path $PSScriptRoot "package_source.ps1") @packageArgs
 
 Write-Host "Uploading source to s3://$bucket/$sourceKey"
 Invoke-AwsCli @("s3", "cp", $zipPath, "s3://$bucket/$sourceKey")
@@ -177,8 +208,14 @@ if ($SmokeThenTrain) {
   Write-Host "  smoke: gameType=$($smokeConfig.GameType) rounds=$($smokeConfig.Rounds) gamesPerRound=$($smokeConfig.GamesPerRound) epochs=$($smokeConfig.Epochs)"
 }
 Write-Host "  training: gameType=$($trainingConfig.GameType) rounds=$($trainingConfig.Rounds) gamesPerRound=$($trainingConfig.GamesPerRound) epochs=$($trainingConfig.Epochs) batchSize=$($trainingConfig.BatchSize) mctsIters=$($trainingConfig.MctsIters) selfPlayWorkers=$($trainingConfig.SelfPlayWorkers)"
+if ($initialCheckpointName) {
+  Write-Host "  checkpoint: $resolvedInitialCheckpointPath (bundled as bundled-checkpoint/$initialCheckpointName)"
+  if ($StartRound -gt 0) {
+    Write-Host "  checkpoint: startRound=$StartRound"
+  }
+}
 
-$instanceTags = New-GpuTrainingTags -TrainingConfig $trainingConfig -Bucket $bucket -SourceKey $sourceKey -RunId $runId -RunType $runType -SmokeConfig $smokeConfig
+$instanceTags = New-GpuTrainingTags -TrainingConfig $trainingConfig -Bucket $bucket -SourceKey $sourceKey -RunId $runId -RunType $runType -SmokeConfig $smokeConfig -InitialCheckpointName $initialCheckpointName -StartRound $StartRound
 $tagSpecifications = Format-Ec2TagSpecifications -Tags $instanceTags
 
 $instanceJson = Invoke-AwsCli @(
@@ -211,6 +248,11 @@ $metadata = [ordered]@{
   smokeThenTrain = [bool]$SmokeThenTrain
   launchedAt = $launchedAt
   trainingConfig = $trainingConfig
+}
+if ($initialCheckpointName) {
+  $metadata.initialCheckpointPath = $resolvedInitialCheckpointPath
+  $metadata.initialCheckpointName = $initialCheckpointName
+  $metadata.startRound = $StartRound
 }
 if ($smokeConfig) {
   $metadata.smokeConfig = $smokeConfig
