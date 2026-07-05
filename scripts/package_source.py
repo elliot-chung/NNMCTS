@@ -31,6 +31,13 @@ def should_skip(path: Path) -> bool:
 BUNDLED_CHECKPOINT_PREFIX = "bundled-checkpoint"
 
 
+def read_archive_bytes(file_path: Path) -> bytes:
+  data = file_path.read_bytes()
+  if file_path.suffix == ".sh":
+    return data.replace(b"\r\n", b"\n")
+  return data
+
+
 def package_repo(repo_root: Path, output_path: Path, checkpoint_path: Path | None = None) -> None:
   if output_path.exists():
     output_path.unlink()
@@ -42,7 +49,7 @@ def package_repo(repo_root: Path, output_path: Path, checkpoint_path: Path | Non
       relative = file_path.relative_to(repo_root)
       if should_skip(relative):
         continue
-      archive.write(file_path, relative.as_posix())
+      archive.writestr(relative.as_posix(), read_archive_bytes(file_path))
 
     if checkpoint_path is not None:
       archive.write(

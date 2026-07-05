@@ -142,10 +142,24 @@ require_time_remaining() {
   fi
 }
 
+python_cmd() {
+  if [[ -f /opt/pytorch/bin/activate ]]; then
+    set +u
+    # shellcheck disable=SC1091
+    source /opt/pytorch/bin/activate
+    set -u
+  fi
+  if command -v python >/dev/null 2>&1; then
+    echo python
+  else
+    echo python3
+  fi
+}
+
 write_manifest() {
   local status="$1"
   local phase="${2:-training}"
-  python -c "
+  "$(python_cmd)" -c "
 import json, pathlib
 checkpoints = sorted(pathlib.Path('${OUTPUT_DIR}/checkpoints').glob('*.pt'))
 manifest = {
@@ -232,7 +246,7 @@ run_training_phase() {
     pipeline_args+=(--start-round "${start_round}")
   fi
 
-  timeout "${limit}" python run_pipeline.py "${pipeline_args[@]}"
+  timeout "${limit}" "$(python_cmd)" run_pipeline.py "${pipeline_args[@]}"
   local train_exit=$?
   set -e
 
@@ -340,7 +354,7 @@ require_time_remaining
 
 export PYTHONPATH="${WORKDIR}/repo"
 nvidia-smi
-python -c "import torch; print('cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else None)"
+"$(python_cmd)" -c "import torch; print('cuda', torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else None)"
 
 mkdir -p "${OUTPUT_DIR}/datasets" "${OUTPUT_DIR}/checkpoints"
 

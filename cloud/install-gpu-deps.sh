@@ -4,8 +4,22 @@ set -euo pipefail
 readonly MARKER_FILE="/opt/nnmcts/.gpu-deps-ready"
 readonly CLOUDWATCH_AGENT_CTL="/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl"
 
+python_cmd() {
+  if [[ -f /opt/pytorch/bin/activate ]]; then
+    set +u
+    # shellcheck disable=SC1091
+    source /opt/pytorch/bin/activate
+    set -u
+  fi
+  if command -v python >/dev/null 2>&1; then
+    echo python
+  else
+    echo python3
+  fi
+}
+
 deps_importable() {
-  python -c "import torch, numpy, tqdm" >/dev/null 2>&1
+  "$(python_cmd)" -c "import torch, numpy, tqdm" >/dev/null 2>&1
 }
 
 if [[ -f "${MARKER_FILE}" ]] && deps_importable; then
@@ -39,18 +53,19 @@ else
   python3 -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cu124
 fi
 
-python -m pip install --quiet --upgrade pip
+PY="$(python_cmd)"
+"${PY}" -m pip install --quiet --upgrade pip
 
-if ! python -c "import numpy" >/dev/null 2>&1; then
+if ! "${PY}" -c "import numpy" >/dev/null 2>&1; then
   echo "$(date -Is) Installing numpy."
-  python -m pip install --quiet numpy
+  "${PY}" -m pip install --quiet numpy
 else
   echo "$(date -Is) numpy already importable; skipping pip install."
 fi
 
-if ! python -c "import tqdm" >/dev/null 2>&1; then
+if ! "${PY}" -c "import tqdm" >/dev/null 2>&1; then
   echo "$(date -Is) Installing tqdm."
-  python -m pip install --quiet tqdm
+  "${PY}" -m pip install --quiet tqdm
 else
   echo "$(date -Is) tqdm already importable; skipping pip install."
 fi

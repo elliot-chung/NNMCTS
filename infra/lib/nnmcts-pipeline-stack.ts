@@ -14,7 +14,9 @@ const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const trainingConfig = loadCloudTrainingConfig(
   path.join(currentDir, "../../config/cloud-training.json"),
 );
-const gpuUserData = fs.readFileSync(path.join(currentDir, "../../cloud/gpu-train.sh"), "utf8");
+const gpuUserData = fs
+  .readFileSync(path.join(currentDir, "../../cloud/gpu-train.sh"), "utf8")
+  .replace(/\r\n/g, "\n");
 const gpuLogGroupName = "/nnmcts/gpu-training";
 
 const BASE_GPU_AMI_IDS: Record<string, string> = {
