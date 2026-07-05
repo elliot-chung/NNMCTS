@@ -4,7 +4,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from nnmcts.cli_utils import load_records_file, save_records_file, default_device
+from nnmcts.cli_utils import load_records_file, save_records_file, default_device, add_non_interactive_logging_arg, tqdm_kwargs
 from play_matches import run_matches
 from train_model import run_training
 
@@ -52,6 +52,7 @@ def build_parser():
   parser.add_argument("--self-play-workers", type=int, default=1, help="Parallel self-play worker processes.")
   parser.add_argument("--show-mcts-timing", action="store_true", help="Print MCTS phase breakdown per move.")
   parser.add_argument("--amp", action="store_true", help="Enable mixed-precision training on CUDA.")
+  add_non_interactive_logging_arg(parser)
   return parser
 
 
@@ -102,7 +103,12 @@ def main():
   round_numbers = range(start_round, start_round + args.rounds)
 
   previous_avg_game_length = None
-  round_iterator = tqdm(round_numbers, desc="Pipeline rounds", unit="round", ascii=True)
+  round_iterator = tqdm(
+    round_numbers,
+    desc="Pipeline rounds",
+    unit="round",
+    **tqdm_kwargs(args.non_interactive_logging),
+  )
   for offset, round_idx in enumerate(round_iterator):
     round_dataset_path = datasets_dir / f"round_{round_idx:03d}.pkl"
 
@@ -136,6 +142,7 @@ def main():
       workers=args.self_play_workers,
       show_mcts_timing=args.show_mcts_timing,
       previous_avg_game_length=previous_avg_game_length,
+      non_interactive_logging=args.non_interactive_logging,
     )
     previous_avg_game_length = match_summary.get("avg_game_length")
 
@@ -171,6 +178,7 @@ def main():
       deduplicate_train=args.deduplicate_train,
       deduplicate_val=args.deduplicate_val,
       use_amp=args.amp,
+      non_interactive_logging=args.non_interactive_logging,
     )
 
     latest_checkpoint = str(checkpoint_output)

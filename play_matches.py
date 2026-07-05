@@ -3,18 +3,21 @@ import multiprocessing as mp
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from queue import Empty
-from time import perf_counter
+from time import monotonic, perf_counter
 
 from tqdm import tqdm
 
 from nnmcts.arena.Arena import Arena
 from nnmcts.cli_utils import (
+  NON_INTERACTIVE_TQDM_MIN_INTERVAL,
+  add_non_interactive_logging_arg,
   create_environment,
   create_player,
   format_ratio,
   default_device,
   save_records_file,
   summarize_results,
+  tqdm_kwargs,
 )
 from nnmcts.selfplay.worker import play_game_worker
 
@@ -72,7 +75,16 @@ def refresh_match_progress(
   num_games: int,
   results: Counter,
   previous_avg_turns: float | None = None,
+  non_interactive_logging: bool = False,
+  force: bool = False,
 ) -> None:
+  if non_interactive_logging and not force:
+    now = monotonic()
+    last_refresh = getattr(progress_bar, "_nnmcts_last_refresh", 0.0)
+    if now - last_refresh < NON_INTERACTIVE_TQDM_MIN_INTERVAL:
+      return
+    progress_bar._nnmcts_last_refresh = now
+
   new_progress = min(
     fractional_games_complete(completed, turn_progress, max_turns, previous_avg_turns),
     num_games,
@@ -117,6 +129,7 @@ def build_parser():
     parser.add_argument(f"--player{player_idx}-iters", type=int, default=100, help="Number of iterations for the player. (Does nothing for random players.)")
     parser.add_argument(f"--player{player_idx}-model", help="Checkpoint path for NMCTS players.")
 
+  add_non_interactive_logging_arg(parser)
   return parser
 
 
@@ -168,6 +181,7 @@ def run_matches(
   show_mcts_timing: bool = False,
   collect_benchmark: bool = False,
   previous_avg_game_length: float | None = None,
+  non_interactive_logging: bool = False,
 ):
   play_device = play_device or device or default_device()
   workers = max(1, workers)
@@ -181,7 +195,12 @@ def run_matches(
   if workers == 1:
     player_one = None
     player_two = None
-    match_iterator = tqdm(range(num_games), desc="Playing matches", unit="game", ascii=True)
+    match_iterator = tqdm(
+      range(num_games),
+      desc="Playing matches",
+      unit="game",
+      **tqdm_kwargs(non_interactive_logging),
+    )
     for _ in match_iterator:
       environment = create_environment(game_type)
       if player_one is None:
@@ -268,8 +287,8 @@ def run_matches(
       total=num_games,
       desc="Playing matches",
       unit="game",
-      ascii=True,
       bar_format="{desc}: {percentage:3.0f}%|{bar}| {n:.1f}/{total} [{elapsed}<{remaining}, {rate_fmt}{postfix}]",
+      **tqdm_kwargs(non_interactive_logging),
     )
 
     with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as executor:
@@ -289,6 +308,7 @@ def run_matches(
           num_games,
           results,
           previous_avg_turns=previous_avg_game_length,
+          non_interactive_logging=non_interactive_logging,
         )
 
         done, pending = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
@@ -315,6 +335,8 @@ def run_matches(
         num_games,
         results,
         previous_avg_turns=previous_avg_game_length,
+        non_interactive_logging=non_interactive_logging,
+        force=True,
       )
       match_iterator.close()
 
@@ -376,6 +398,7 @@ def main():
     record_output=args.record_output,
     workers=args.workers,
     show_mcts_timing=args.show_mcts_timing,
+    non_interactive_logging=args.non_interactive_logging,
   )
 
   print(f"Player One wins: {summary['player_one_wins']} ({format_ratio(summary['player_one_win_rate'])})")

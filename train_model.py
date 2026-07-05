@@ -5,6 +5,7 @@ from torch import nn
 from tqdm import tqdm
 
 from nnmcts.cli_utils import (
+  add_non_interactive_logging_arg,
   build_model,
   build_record_datasets,
   create_dataloaders,
@@ -14,6 +15,7 @@ from nnmcts.cli_utils import (
   prepare_inputs,
   save_model_checkpoint,
   soft_cross_entropy,
+  tqdm_kwargs,
 )
 
 
@@ -40,6 +42,7 @@ def build_parser():
   parser.add_argument("--deduplicate-train", action="store_true", help="Deduplicate training dataset.")
   parser.add_argument("--deduplicate-val", action="store_true", help="Deduplicate validation dataset.")
   parser.add_argument("--amp", action="store_true", help="Enable mixed-precision training on CUDA.")
+  add_non_interactive_logging_arg(parser)
   return parser
 
 
@@ -87,6 +90,7 @@ def run_training(
   deduplicate_train: bool,
   deduplicate_val: bool,
   use_amp: bool = False,
+  non_interactive_logging: bool = False,
 ):
   torch.manual_seed(seed)
 
@@ -120,7 +124,12 @@ def run_training(
   scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 
   history = []
-  epoch_iterator = tqdm(range(epochs), desc="Training epochs", unit="epoch", ascii=True)
+  epoch_iterator = tqdm(
+    range(epochs),
+    desc="Training epochs",
+    unit="epoch",
+    **tqdm_kwargs(non_interactive_logging),
+  )
   for epoch in epoch_iterator:
     model.train()
     total_loss = 0.0
@@ -212,6 +221,7 @@ def main():
     deduplicate_train=args.deduplicate_train,
     deduplicate_val=args.deduplicate_val,
     use_amp=args.amp,
+    non_interactive_logging=args.non_interactive_logging,
   )
 
   print(f"Training dataset size: {result['train_size']}")

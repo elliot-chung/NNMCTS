@@ -240,6 +240,7 @@ run_training_phase() {
     --amp
     --augment-train
     --deduplicate-train
+    --non-interactive-logging
   )
   if [[ -n "${initial_checkpoint}" ]]; then
     pipeline_args+=(--initial-checkpoint "${initial_checkpoint}")

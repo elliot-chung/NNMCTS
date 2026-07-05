@@ -1,9 +1,51 @@
 import pickle
 import random
+import sys
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+NON_INTERACTIVE_TQDM_MIN_INTERVAL = 30.0
+
+
+class _NonInteractiveStream:
+  """Wraps a stream so tqdm writes newline-separated lines instead of \\r overwrites."""
+
+  __slots__ = ("_stream",)
+
+  def __init__(self, stream):
+    self._stream = stream
+
+  def write(self, data):
+    return self._stream.write(data)
+
+  def flush(self):
+    return self._stream.flush()
+
+  def isatty(self):
+    return False
+
+
+def add_non_interactive_logging_arg(parser) -> None:
+  parser.add_argument(
+    "--non-interactive-logging",
+    action="store_true",
+    help="Reduce tqdm update frequency and emit plain log lines instead of in-place bar redraws.",
+  )
+
+
+def tqdm_kwargs(non_interactive_logging: bool = False, **overrides) -> dict:
+  kwargs = {"ascii": True}
+  if non_interactive_logging:
+    kwargs.update({
+      "file": _NonInteractiveStream(sys.stderr),
+      "mininterval": NON_INTERACTIVE_TQDM_MIN_INTERVAL,
+      "maxinterval": NON_INTERACTIVE_TQDM_MIN_INTERVAL * 4,
+      "dynamic_ncols": False,
+    })
+  kwargs.update(overrides)
+  return kwargs
 
 import torch
 from torch.utils.data import DataLoader, TensorDataset
