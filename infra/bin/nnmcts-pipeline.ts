@@ -16,5 +16,5 @@ if (!account) {
 
 new NnmctsPipelineStack(app, "NnmctsPipelineStack", {
   env: { account, region },
-  description: "NNMCTS cloud training pipeline (CodeBuild + S3 + GPU EC2)",
+  description: "NNMCTS cloud GPU training pipeline (S3 + GPU EC2)",
 });

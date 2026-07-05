@@ -81,66 +81,103 @@ function Get-InstanceState {
   return "$($result.Output)".Trim()
 }
 
-function Get-RecentInstanceLogs {
-  param([string]$Id, [int]$Lines)
+function Convert-AwsCliOutputToText {
+  param($Output)
 
-  $ssmReady = Invoke-AwsCliAllowFailure @(
-    "ssm", "describe-instance-information",
-    "--filters", "Key=InstanceIds,Values=$Id",
-    "--query", "InstanceInformationList[0].PingStatus",
-    "--output", "text"
-  )
-  if ($ssmReady.ExitCode -ne 0 -or "$($ssmReady.Output)".Trim() -ne "Online") {
-    Write-Host "SSM not available for $Id (instance may still be booting or already terminated)."
-    return
+  if ($null -eq $Output) {
+    return ""
   }
+  if ($Output -is [System.Array]) {
+    return ($Output | ForEach-Object { "$_" }) -join "`n"
+  }
+  return "$Output"
+}
 
-  $commandJson = Invoke-AwsCli @(
-    "ssm", "send-command",
-    "--instance-ids", $Id,
-    "--document-name", "AWS-RunShellScript",
-    "--parameters", "commands=tail -n $Lines /var/log/nnmcts-gpu-train.log",
-    "--query", "Command.CommandId",
-    "--output", "text"
+function Get-CloudWatchLogs {
+  param(
+    [string]$LogGroup,
+    [string]$StreamName,
+    [int]$Lines
   )
-  $commandId = "$commandJson".Trim()
 
-  $deadline = (Get-Date).AddMinutes(2)
-  while ((Get-Date) -lt $deadline) {
-    Start-Sleep -Seconds 3
-    $statusResult = Invoke-AwsCliAllowFailure @(
-      "ssm", "get-command-invocation",
-      "--command-id", $commandId,
-      "--instance-id", $Id,
-      "--query", "Status",
-      "--output", "text"
+  $previousPythonUtf8 = $env:PYTHONUTF8
+  $env:PYTHONUTF8 = "1"
+  try {
+    $result = Invoke-AwsCliAllowFailure @(
+      "logs", "get-log-events",
+      "--log-group-name", $LogGroup,
+      "--log-stream-name", $StreamName,
+      "--limit", "$Lines",
+      "--no-start-from-head",
+      "--no-cli-pager",
+      "--output", "json"
     )
-    $status = "$($statusResult.Output)".Trim()
-    if ($status -in @("Success", "Failed", "Cancelled", "TimedOut")) {
-      break
+  }
+  finally {
+    if ($null -eq $previousPythonUtf8) {
+      Remove-Item Env:PYTHONUTF8 -ErrorAction SilentlyContinue
+    }
+    else {
+      $env:PYTHONUTF8 = $previousPythonUtf8
     }
   }
 
-  $invocation = Invoke-AwsCliAllowFailure @(
-    "ssm", "get-command-invocation",
-    "--command-id", $commandId,
-    "--instance-id", $Id,
-    "--output", "json"
-  )
-  if ($invocation.ExitCode -ne 0) {
-    Write-Host "Could not fetch logs from instance."
+  if ($result.ExitCode -ne 0) {
+    $errorText = Convert-AwsCliOutputToText -Output $result.Output
+    if ($errorText -match "ResourceNotFoundException") {
+      Write-Host ""
+      Write-Host "=== Recent CloudWatch logs ==="
+      Write-Host "No log events yet (instance may still be booting)."
+      return
+    }
+    Write-Host ""
+    Write-Host "=== Recent CloudWatch logs ==="
+    Write-Host "Could not fetch logs from CloudWatch: $errorText"
     return
   }
 
-  $payload = $invocation.Output | ConvertFrom-Json
+  $jsonText = Convert-AwsCliOutputToText -Output $result.Output
+  if (-not $jsonText) {
+    Write-Host ""
+    Write-Host "=== Recent CloudWatch logs ==="
+    Write-Host "No log events yet (instance may still be booting)."
+    return
+  }
+
+  $payload = $jsonText | ConvertFrom-Json
+  $events = @($payload.events)
+  if ($events.Count -eq 0) {
+    Write-Host ""
+    Write-Host "=== Recent CloudWatch logs ==="
+    Write-Host "No log events yet (instance may still be booting)."
+    return
+  }
+
   Write-Host ""
-  Write-Host "=== Recent instance log (last $Lines lines) ==="
-  if ($payload.StandardOutputContent) {
-    Write-Host $payload.StandardOutputContent
+  Write-Host "=== Recent CloudWatch logs (last $($events.Count) events) ==="
+  foreach ($event in ($events | Sort-Object timestamp)) {
+    Write-Host $event.message
   }
-  if ($payload.StandardErrorContent) {
-    Write-Host $payload.StandardErrorContent
+}
+
+function Resolve-LogGroupName {
+  param($Metadata)
+
+  if ($Metadata.logGroupName) {
+    return "$($Metadata.logGroupName)"
   }
+
+  $result = Invoke-AwsCliAllowFailure @(
+    "cloudformation", "describe-stacks",
+    "--stack-name", $StackName,
+    "--query", "Stacks[0].Outputs[?OutputKey=='GpuTrainingLogGroupName'].OutputValue",
+    "--output", "text"
+  )
+  if ($result.ExitCode -eq 0 -and "$($result.Output)".Trim()) {
+    return "$($result.Output)".Trim()
+  }
+
+  return "/nnmcts/gpu-training"
 }
 
 function Show-RunStatus {
@@ -150,12 +187,14 @@ function Show-RunStatus {
   $runId = $Metadata.runId
   $instanceId = $Metadata.instanceId
   $manifestKey = "runs/$runId/manifest.json"
+  $logGroup = Resolve-LogGroupName -Metadata $Metadata
 
   Write-Host "=== GPU training status ==="
   Write-Host "Run ID:       $runId"
   Write-Host "Instance ID:  $instanceId"
   Write-Host "Launched:     $($Metadata.launchedAt)"
   Write-Host "Manifest:     s3://$bucket/$manifestKey"
+  Write-Host "CloudWatch:   $logGroup / $instanceId"
 
   $state = Get-InstanceState -Id $instanceId
   Write-Host "Instance:     $state"
@@ -174,12 +213,11 @@ function Show-RunStatus {
     Write-Host "Manifest:     not uploaded yet"
   }
 
-  if ($state -in @("running", "pending")) {
-    Get-RecentInstanceLogs -Id $instanceId -Lines $LogLines
-  }
-  elseif ($state -in @("terminated", "shutting-down", "stopped", "stopping") -and -not (Test-S3ObjectExists -Bucket $bucket -Key $manifestKey)) {
+  Get-CloudWatchLogs -LogGroup $logGroup -StreamName $instanceId -Lines $LogLines
+
+  if ($state -in @("terminated", "shutting-down", "stopped", "stopping") -and -not (Test-S3ObjectExists -Bucket $bucket -Key $manifestKey)) {
     Write-Host ""
-    Write-Host "Instance ended without uploading a manifest. Logs are only available while the instance is running."
+    Write-Host "Instance ended without uploading a manifest. Check CloudWatch logs above or s3://$bucket/runs/$runId/gpu-train.log after upload."
   }
 }
 

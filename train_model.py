@@ -23,23 +23,24 @@ def build_parser():
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
   )
   parser.add_argument("--game-type", choices=("TTT", "UTTT"), required=True)
-  parser.add_argument("--dataset-path", required=True)
-  parser.add_argument("--output-model", required=True)
+  parser.add_argument("--dataset-path", required=True, help="Path to the recorded dataset to train on.")
+  parser.add_argument("--output-model", required=True, help="Path to save the trained model.")
   parser.add_argument("--checkpoint-path", help="Optional checkpoint to resume from.")
-  parser.add_argument("--device", default=default_device())
-  parser.add_argument("--epochs", type=int, default=100)
-  parser.add_argument("--batch-size", type=int, default=64)
-  parser.add_argument("--learning-rate", type=float, default=1e-3)
-  parser.add_argument("--weight-decay", type=float, default=0.0)
-  parser.add_argument("--value-loss-weight", type=float, default=0.1)
-  parser.add_argument("--policy-loss-weight", type=float, default=0.9)
-  parser.add_argument("--val-split", type=float, default=0.2)
-  parser.add_argument("--seed", type=int, default=0)
-  parser.add_argument("--log-every", type=int, default=10)
-  parser.add_argument("--augment-train", action="store_true")
-  parser.add_argument("--augment-val", action="store_true")
-  parser.add_argument("--deduplicate-train", action="store_true")
-  parser.add_argument("--deduplicate-val", action="store_true")
+  parser.add_argument("--device", choices=("cpu", "cuda"), default=default_device(), help="Device to use for training.")
+  parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs.")
+  parser.add_argument("--batch-size", type=int, default=64, help="Batch size for training.")
+  parser.add_argument("--learning-rate", type=float, default=1e-3, help="Learning rate for training.")
+  parser.add_argument("--weight-decay", type=float, default=0.0, help="Weight decay for training.")
+  parser.add_argument("--value-loss-weight", type=float, default=0.1, help="Weight for value loss in training.")
+  parser.add_argument("--policy-loss-weight", type=float, default=0.9, help="Weight for policy loss in training.")
+  parser.add_argument("--val-split", type=float, default=0.2, help="Validation split for training.")
+  parser.add_argument("--seed", type=int, default=0, help="Random seed for training.")
+  parser.add_argument("--log-every", type=int, default=10, help="Log every n epochs.")
+  parser.add_argument("--augment-train", action="store_true", help="Augment training dataset.")
+  parser.add_argument("--augment-val", action="store_true", help="Augment validation dataset.")
+  parser.add_argument("--deduplicate-train", action="store_true", help="Deduplicate training dataset.")
+  parser.add_argument("--deduplicate-val", action="store_true", help="Deduplicate validation dataset.")
+  parser.add_argument("--amp", action="store_true", help="Enable mixed-precision training on CUDA.")
   return parser
 
 
@@ -87,6 +88,7 @@ def run_training(
   augment_val: bool,
   deduplicate_train: bool,
   deduplicate_val: bool,
+  use_amp: bool = False,
 ):
   torch.manual_seed(seed)
 
@@ -109,34 +111,38 @@ def run_training(
     deduplicate_train=deduplicate_train,
     deduplicate_val=deduplicate_val,
   )
-  train_loader, val_loader = create_dataloaders(train_dataset, val_dataset, batch_size)
+  train_loader, val_loader = create_dataloaders(train_dataset, val_dataset, batch_size, device=device)
 
   model, checkpoint_metadata = build_model(game_type, checkpoint_path=checkpoint_path, device=device)
   model.train()
   optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
   criterion_value = nn.MSELoss()
   spec = get_game_spec(game_type)
+  amp_enabled = use_amp and str(device).startswith("cuda")
+  scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 
   history = []
-  epoch_iterator = tqdm(range(epochs), desc="Training epochs", unit="epoch")
+  epoch_iterator = tqdm(range(epochs), desc="Training epochs", unit="epoch", ascii=True)
   for epoch in epoch_iterator:
     model.train()
     total_loss = 0.0
 
     for batch in train_loader:
       inputs, policies, rewards = prepare_inputs(spec.game_type, batch)
-      inputs = inputs.to(device)
-      policies = policies.to(device)
-      rewards = rewards.to(device)
+      inputs = inputs.to(device, non_blocking=amp_enabled)
+      policies = policies.to(device, non_blocking=amp_enabled)
+      rewards = rewards.to(device, non_blocking=amp_enabled)
 
-      predicted_policy_logits, predicted_values = model(inputs)
-      policy_loss = soft_cross_entropy(predicted_policy_logits, policies)
-      value_loss = criterion_value(predicted_values.squeeze(-1), rewards)
-      loss = (policy_loss_weight * policy_loss) + (value_loss_weight * value_loss)
+      optimizer.zero_grad(set_to_none=True)
+      with torch.amp.autocast("cuda", enabled=amp_enabled):
+        predicted_policy_logits, predicted_values = model(inputs)
+        policy_loss = soft_cross_entropy(predicted_policy_logits, policies)
+        value_loss = criterion_value(predicted_values.squeeze(-1), rewards)
+        loss = (policy_loss_weight * policy_loss) + (value_loss_weight * value_loss)
 
-      optimizer.zero_grad()
-      loss.backward()
-      optimizer.step()
+      scaler.scale(loss).backward()
+      scaler.step(optimizer)
+      scaler.update()
 
       total_loss += loss.item() * rewards.shape[0]
 
@@ -174,6 +180,7 @@ def run_training(
     "history": history,
     "base_checkpoint": checkpoint_path,
     "loaded_checkpoint_metadata": checkpoint_metadata,
+    "use_amp": amp_enabled,
   }
   save_model_checkpoint(output_model, model, spec.game_type, metadata)
 
@@ -207,6 +214,7 @@ def main():
     augment_val=args.augment_val,
     deduplicate_train=args.deduplicate_train,
     deduplicate_val=args.deduplicate_val,
+    use_amp=args.amp,
   )
 
   print(f"Training dataset size: {result['train_size']}")

@@ -23,7 +23,10 @@ def should_skip(path: Path) -> bool:
   return path.suffix in EXCLUDE_EXTENSIONS
 
 
-def package_repo(repo_root: Path, output_path: Path) -> None:
+BUNDLED_CHECKPOINT_PREFIX = "bundled-checkpoint"
+
+
+def package_repo(repo_root: Path, output_path: Path, checkpoint_path: Path | None = None) -> None:
   if output_path.exists():
     output_path.unlink()
 
@@ -36,9 +39,15 @@ def package_repo(repo_root: Path, output_path: Path) -> None:
         continue
       archive.write(file_path, relative.as_posix())
 
+    if checkpoint_path is not None:
+      archive.write(
+        checkpoint_path,
+        f"{BUNDLED_CHECKPOINT_PREFIX}/{checkpoint_path.name}",
+      )
+
 
 def main() -> None:
-  parser = argparse.ArgumentParser(description="Package NNMCTS source for CodeBuild.")
+  parser = argparse.ArgumentParser(description="Package NNMCTS source for cloud GPU training.")
   parser.add_argument(
     "--repo-root",
     type=Path,
@@ -49,9 +58,21 @@ def main() -> None:
     type=Path,
     default=Path(__file__).resolve().parents[1] / "dist" / "nnmcts-source.zip",
   )
+  parser.add_argument(
+    "--checkpoint",
+    type=Path,
+    help="Optional checkpoint file to bundle at bundled-checkpoint/<filename> in the archive.",
+  )
   args = parser.parse_args()
   args.output.parent.mkdir(parents=True, exist_ok=True)
-  package_repo(args.repo_root, args.output)
+  checkpoint_path = args.checkpoint
+  if checkpoint_path is not None:
+    checkpoint_path = checkpoint_path.resolve()
+    if not checkpoint_path.is_file():
+      raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    if checkpoint_path.suffix != ".pt":
+      raise ValueError(f"Checkpoint must be a .pt file: {checkpoint_path}")
+  package_repo(args.repo_root, args.output, checkpoint_path)
   print(args.output)
 
 

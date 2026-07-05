@@ -48,12 +48,13 @@ from nnmcts.mcts.mcts import mcts
 from nnmcts.mcts.nodes import Node
 
 class MCTS_Player(Player):
-  def __init__(self, environment, is_first=True, iter_count=100):
+  def __init__(self, environment, is_first=True, iter_count=100, show_mcts_timing=False):
     super().__init__(environment, is_first)
     self.iter_count = iter_count
+    self.show_mcts_timing = show_mcts_timing
 
   def on_my_turn(self):
     env_copy = self.environment.copy()
     n = Node(env_copy, env_copy.is_terminal(), None, None)
-    n, policy = mcts(n, self.iter_count)
+    n, policy = mcts(n, self.iter_count, show_execution_time=self.show_mcts_timing)
     return n.action, policy

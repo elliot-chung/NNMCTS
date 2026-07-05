@@ -1,0 +1,28 @@
+{
+    "runId":  "gpu-smoke-20260702-104704",
+    "instanceId":  "i-02fe883a7fcd02eb1",
+    "bucket":  "nnmcts-artifacts-730335282892-us-west-1",
+    "sourceKey":  "source/nnmcts-gpu-smoke-20260702-104704.zip",
+    "manifestKey":  "runs/gpu-smoke-20260702-104704/manifest.json",
+    "profile":  "personal",
+    "region":  "us-west-1",
+    "stackName":  "NnmctsPipelineStack",
+    "trainingProfile":  "gpuSmoke",
+    "runType":  "smoke",
+    "launchedAt":  "2026-07-02T10:47:04.2675968-07:00",
+    "trainingConfig":  {
+                           "GameType":  "UTTT",
+                           "Rounds":  1,
+                           "GamesPerRound":  2,
+                           "Epochs":  1,
+                           "BatchSize":  32,
+                           "MctsIters":  10,
+                           "Player1Type":  "mcts",
+                           "Player2Type":  "mcts",
+                           "SelfPlayWorkers":  1,
+                           "MaxTrainingSeconds":  600,
+                           "MaxInstanceSeconds":  1800,
+                           "ConfigPath":  "C:\\Users\\ellio\\NNMCTS\\config\\cloud-training.json",
+                           "Profile":  "gpuSmoke"
+                       }
+}

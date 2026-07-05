@@ -1,29 +1,34 @@
 {
   "timeouts": {
-    "maxRuntimeSeconds": 3600,
-    "codeBuildTimeoutMinutes": 60,
-    "codeBuildQueuedTimeoutMinutes": 30,
     "maxInstanceSeconds": 90000,
-    "maxTrainingSeconds": 90000
+    "maxTrainingSeconds": 90000,
+    "maxSmokeInstanceSeconds": 1800,
+    "maxSmokeTrainingSeconds": 600
   },
-  "smoke": {
-    "gameType": "TTT",
-    "rounds": 3,
-    "gamesPerRound": 50,
-    "epochs": 10,
-    "batchSize": 64,
-    "mctsIters": 50,
+  "gpuSmoke": {
+    "gameType": "UTTT",
+    "rounds": 1,
+    "gamesPerRound": 2,
+    "epochs": 1,
+    "batchSize": 32,
+    "mctsIters": 10,
     "player1Type": "mcts",
-    "player2Type": "mcts"
+    "player2Type": "mcts",
+    "selfPlayWorkers": 1,
+    "playDevice": "cpu",
+    "trainDevice": "cuda"
   },
   "gpu": {
     "gameType": "UTTT",
-    "rounds": 20,
-    "gamesPerRound": 20,
-    "epochs": 20,
+    "rounds": 50,
+    "gamesPerRound": 100,
+    "epochs": 100,
     "batchSize": 128,
-    "mctsIters": 50,
+    "mctsIters": 100,
     "player1Type": "nmcts",
-    "player2Type": "nmcts"
+    "player2Type": "nmcts",
+    "selfPlayWorkers": 4,
+    "playDevice": "cpu",
+    "trainDevice": "cuda"
   }
 }

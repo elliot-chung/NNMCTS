@@ -3,6 +3,9 @@ param(
   [string]$Region,
   [string]$StackName,
   [string]$ConfigPath,
+  [ValidateSet("gpuSmoke", "gpu")]
+  [string]$TrainingProfile = "gpu",
+  [switch]$SmokeThenTrain,
   [string]$GameType,
   [int]$Rounds = 0,
   [int]$GamesPerRound = 0,
@@ -11,8 +14,12 @@ param(
   [int]$MctsIters = 0,
   [string]$Player1Type,
   [string]$Player2Type,
+  [int]$SelfPlayWorkers = 0,
+  [string]$InitialCheckpointPath,
+  [int]$StartRound = 0,
   [int]$MaxTrainingSeconds = 0,
-  [int]$MaxInstanceSeconds = 0
+  [int]$MaxInstanceSeconds = 0,
+  [switch]$Wait
 )
 
 . (Join-Path $PSScriptRoot "Resolve-AwsConfig.ps1")
@@ -22,7 +29,24 @@ $Region = $awsConfig.Region
 $StackName = $awsConfig.StackName
 
 . (Join-Path $PSScriptRoot "Resolve-CloudTrainingConfig.ps1")
-$trainingConfig = Resolve-CloudTrainingConfig -Profile gpu -ConfigPath $ConfigPath -GameType $GameType -Rounds $Rounds -GamesPerRound $GamesPerRound -Epochs $Epochs -BatchSize $BatchSize -MctsIters $MctsIters -Player1Type $Player1Type -Player2Type $Player2Type -MaxTrainingSeconds $MaxTrainingSeconds -MaxInstanceSeconds $MaxInstanceSeconds
+$trainingConfig = Resolve-CloudTrainingConfig -Profile $TrainingProfile -ConfigPath $ConfigPath -GameType $GameType -Rounds $Rounds -GamesPerRound $GamesPerRound -Epochs $Epochs -BatchSize $BatchSize -MctsIters $MctsIters -Player1Type $Player1Type -Player2Type $Player2Type -SelfPlayWorkers $SelfPlayWorkers -MaxTrainingSeconds $MaxTrainingSeconds -MaxInstanceSeconds $MaxInstanceSeconds
+
+$smokeConfig = $null
+if ($SmokeThenTrain) {
+  if ($InitialCheckpointPath) {
+    Write-Warning "Initial checkpoint provided; skipping smoke test."
+    $SmokeThenTrain = $false
+  }
+  else {
+    $smokeConfig = Resolve-CloudTrainingConfig -Profile gpuSmoke -ConfigPath $ConfigPath -GameType $GameType
+    $TrainingProfile = "gpu"
+  }
+}
+
+if ($InitialCheckpointPath -and $TrainingProfile -eq "gpuSmoke") {
+  Write-Warning "Initial checkpoint provided; using full GPU training profile instead of smoke."
+  $TrainingProfile = "gpu"
+}
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
@@ -35,6 +59,22 @@ function Invoke-AwsCli {
   }
 }
 
+function Invoke-AwsCliAllowFailure {
+  param([string[]]$CommandArgs)
+  $ErrorActionPreference = "SilentlyContinue"
+  & aws @CommandArgs --profile $Profile --region $Region 2>$null | Out-Null
+  $exitCode = $LASTEXITCODE
+  $ErrorActionPreference = "Stop"
+  return $exitCode -eq 0
+}
+
+function Test-StackExists {
+  return Invoke-AwsCliAllowFailure @(
+    "cloudformation", "describe-stacks",
+    "--stack-name", $StackName
+  )
+}
+
 function Get-StackOutput {
   param([string]$Key)
   $value = Invoke-AwsCli @(
@@ -44,6 +84,15 @@ function Get-StackOutput {
     "--output", "text"
   )
   return $value.Trim()
+}
+
+function Require-StackOutput {
+  param([string]$Key)
+  $value = Get-StackOutput -Key $Key
+  if ([string]::IsNullOrWhiteSpace($value) -or $value -eq "None") {
+    throw "Stack '$StackName' is missing output '$Key'. Deploy the stack first: .\scripts\run_cloud_pipeline.ps1 -DeployOnly"
+  }
+  return $value
 }
 
 function Format-Ec2TagSpecifications {
@@ -58,22 +107,115 @@ function Format-Ec2TagSpecifications {
   return "ResourceType=instance,Tags=[$($formattedTags -join ',')]"
 }
 
-$bucket = Get-StackOutput -Key "ArtifactsBucketName"
-$launchTemplate = Get-StackOutput -Key "GpuLaunchTemplateName"
-$runId = "gpu-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+function Test-S3ObjectExists {
+  param([string]$Bucket, [string]$Key)
+  return Invoke-AwsCliAllowFailure @(
+    "s3api", "head-object",
+    "--bucket", $Bucket,
+    "--key", $Key
+  )
+}
+
+function Get-InstanceState {
+  param([string]$Id)
+  if (-not (Invoke-AwsCliAllowFailure @("ec2", "describe-instances", "--instance-ids", $Id))) {
+    return "unknown"
+  }
+  $state = Invoke-AwsCli @(
+    "ec2", "describe-instances",
+    "--instance-ids", $Id,
+    "--query", "Reservations[0].Instances[0].State.Name",
+    "--output", "text"
+  )
+  return $state.Trim()
+}
+
+function Wait-ForGpuRun {
+  param(
+    [string]$Bucket,
+    [string]$RunId,
+    [string]$InstanceId,
+    [string]$LogGroup,
+    [string]$Label
+  )
+
+  $manifestKey = "runs/$RunId/manifest.json"
+  Write-Host "Waiting for $Label to finish (manifest: s3://$Bucket/$manifestKey)..."
+
+  while ($true) {
+    if (Test-S3ObjectExists -Bucket $Bucket -Key $manifestKey) {
+      $manifestJson = Invoke-AwsCli @("s3", "cp", "s3://$Bucket/$manifestKey", "-")
+      $manifest = $manifestJson | ConvertFrom-Json
+      Write-Host ""
+      Write-Host "=== $Label manifest ==="
+      Write-Host $manifestJson
+      if ($manifest.status -ne "complete") {
+        throw "$Label finished with status '$($manifest.status)'. Check s3://$Bucket/runs/$RunId/gpu-train.log"
+      }
+      return
+    }
+
+    $state = Get-InstanceState -Id $InstanceId
+    Write-Host "  instance=$state (no manifest yet)"
+    if ($state -in @("terminated", "shutting-down", "stopped", "stopping")) {
+      throw "$Label instance ended without uploading a manifest. Check CloudWatch log group '$LogGroup' stream '$InstanceId' or s3://$Bucket/runs/$RunId/gpu-train.log."
+    }
+
+    Start-Sleep -Seconds 30
+  }
+}
+
+if (-not (Test-StackExists)) {
+  throw "CloudFormation stack '$StackName' was not found in $Region. Deploy it first: .\scripts\run_cloud_pipeline.ps1 -DeployOnly"
+}
+
+$bucket = Require-StackOutput -Key "ArtifactsBucketName"
+$launchTemplate = Require-StackOutput -Key "GpuLaunchTemplateName"
+$logGroupName = Require-StackOutput -Key "GpuTrainingLogGroupName"
+
+$initialCheckpointName = $null
+$resolvedInitialCheckpointPath = $null
+if ($InitialCheckpointPath) {
+  if (-not (Test-Path -LiteralPath $InitialCheckpointPath)) {
+    throw "Initial checkpoint not found: $InitialCheckpointPath"
+  }
+  $resolvedInitialCheckpointPath = (Resolve-Path -LiteralPath $InitialCheckpointPath).Path
+  $initialCheckpointName = [IO.Path]::GetFileName($resolvedInitialCheckpointPath)
+  if ($initialCheckpointName -notlike "*.pt") {
+    throw "Initial checkpoint must be a .pt file: $resolvedInitialCheckpointPath"
+  }
+}
+
+$runPrefix = if ($TrainingProfile -eq "gpuSmoke") { "gpu-smoke" } elseif ($initialCheckpointName) { "gpu-resume" } else { "gpu" }
+$runId = "$runPrefix-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 $sourceKey = "source/nnmcts-$runId.zip"
 $launchedAt = (Get-Date).ToString("o")
+$runType = if ($SmokeThenTrain) { "pipeline" } elseif ($TrainingProfile -eq "gpuSmoke") { "smoke" } else { "training" }
+$runLabel = if ($SmokeThenTrain) { "GPU pipeline (smoke + training)" } elseif ($TrainingProfile -eq "gpuSmoke") { "GPU smoke test" } else { "GPU training" }
 
 Write-Host "Packaging source..."
-$zipPath = & (Join-Path $PSScriptRoot "package_source.ps1")
+$packageArgs = @{}
+if ($resolvedInitialCheckpointPath) {
+  $packageArgs.CheckpointPath = $resolvedInitialCheckpointPath
+}
+$zipPath = & (Join-Path $PSScriptRoot "package_source.ps1") @packageArgs
 
 Write-Host "Uploading source to s3://$bucket/$sourceKey"
 Invoke-AwsCli @("s3", "cp", $zipPath, "s3://$bucket/$sourceKey")
 
-Write-Host "Launching GPU training instance (max $($trainingConfig.MaxTrainingSeconds)s training / $($trainingConfig.MaxInstanceSeconds)s instance cap)..."
-Write-Host "  gameType=$($trainingConfig.GameType) rounds=$($trainingConfig.Rounds) gamesPerRound=$($trainingConfig.GamesPerRound) epochs=$($trainingConfig.Epochs) batchSize=$($trainingConfig.BatchSize) mctsIters=$($trainingConfig.MctsIters)"
+Write-Host "Launching $runLabel instance (max $($trainingConfig.MaxTrainingSeconds)s training / $($trainingConfig.MaxInstanceSeconds)s instance cap)..."
+if ($SmokeThenTrain) {
+  Write-Host "  smoke: gameType=$($smokeConfig.GameType) rounds=$($smokeConfig.Rounds) gamesPerRound=$($smokeConfig.GamesPerRound) epochs=$($smokeConfig.Epochs)"
+}
+Write-Host "  training: gameType=$($trainingConfig.GameType) rounds=$($trainingConfig.Rounds) gamesPerRound=$($trainingConfig.GamesPerRound) epochs=$($trainingConfig.Epochs) batchSize=$($trainingConfig.BatchSize) mctsIters=$($trainingConfig.MctsIters) selfPlayWorkers=$($trainingConfig.SelfPlayWorkers)"
+if ($initialCheckpointName) {
+  Write-Host "  checkpoint: $resolvedInitialCheckpointPath (bundled as bundled-checkpoint/$initialCheckpointName)"
+  if ($StartRound -gt 0) {
+    Write-Host "  checkpoint: startRound=$StartRound"
+  }
+}
 
-$instanceTags = New-GpuTrainingTags -TrainingConfig $trainingConfig -Bucket $bucket -SourceKey $sourceKey -RunId $runId
+$instanceTags = New-GpuTrainingTags -TrainingConfig $trainingConfig -Bucket $bucket -SourceKey $sourceKey -RunId $runId -RunType $runType -SmokeConfig $smokeConfig -InitialCheckpointName $initialCheckpointName -StartRound $StartRound
 $tagSpecifications = Format-Ec2TagSpecifications -Tags $instanceTags
 
 $instanceJson = Invoke-AwsCli @(
@@ -100,21 +242,39 @@ $metadata = [ordered]@{
   profile = $Profile
   region = $Region
   stackName = $StackName
+  logGroupName = $logGroupName
+  trainingProfile = $TrainingProfile
+  runType = $runType
+  smokeThenTrain = [bool]$SmokeThenTrain
   launchedAt = $launchedAt
   trainingConfig = $trainingConfig
+}
+if ($initialCheckpointName) {
+  $metadata.initialCheckpointPath = $resolvedInitialCheckpointPath
+  $metadata.initialCheckpointName = $initialCheckpointName
+  $metadata.startRound = $StartRound
+}
+if ($smokeConfig) {
+  $metadata.smokeConfig = $smokeConfig
 }
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 [System.IO.File]::WriteAllText($metadataPath, ($metadata | ConvertTo-Json -Depth 4), $utf8NoBom)
 
 Write-Host ""
-Write-Host "GPU training launched."
+Write-Host "$runLabel launched."
 Write-Host "  Instance ID:  $instanceId"
 Write-Host "  Run ID:       $runId"
 Write-Host "  Manifest:     s3://$bucket/runs/$runId/manifest.json"
 Write-Host "  Run metadata: $metadataPath"
 Write-Host ""
+
+if ($Wait) {
+  Wait-ForGpuRun -Bucket $bucket -RunId $runId -InstanceId $instanceId -LogGroup $logGroupName -Label $runLabel
+  return
+}
+
 Write-Host "Check status and recent logs:"
-Write-Host "  .\scripts\check_gpu_training.ps1"
+Write-Host "  .\scripts\check_gpu_training.ps1 -MetadataPath `"$metadataPath`""
 Write-Host ""
 Write-Host "Poll until complete:"
-Write-Host "  .\scripts\check_gpu_training.ps1 -Follow"
+Write-Host "  .\scripts\check_gpu_training.ps1 -MetadataPath `"$metadataPath`" -Follow"
