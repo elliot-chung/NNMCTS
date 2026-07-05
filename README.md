@@ -78,6 +78,7 @@ Pit two players against each other and print win/draw statistics. Optionally rec
 | `--workers` | 1 | Parallel self-play worker processes |
 | `--record-output` | — | Save recorded positions to this `.pkl` path |
 | `--show-mcts-timing` | off | Print MCTS phase breakdown per move |
+| `--non-interactive-logging` | off | Throttle tqdm progress updates and emit plain log lines (for non-TTY shells and log files) |
 
 **Examples**
 
@@ -134,6 +135,7 @@ Train (or fine-tune) a policy/value network from a recorded dataset produced by 
 | `--augment-train` / `--augment-val` | off | Symmetry augmentation on train/val |
 | `--deduplicate-train` / `--deduplicate-val` | off | Deduplicate positions with averaged labels |
 | `--amp` | off | Mixed-precision training on CUDA |
+| `--non-interactive-logging` | off | Throttle tqdm progress updates and emit plain log lines (for non-TTY shells and log files) |
 
 **Example**
 
@@ -197,8 +199,7 @@ Alternate self-play and supervised training for several rounds. Each round gener
 | `--self-play-workers` | 1 | Parallel self-play workers |
 | `--show-mcts-timing` | off | MCTS timing diagnostics |
 | `--amp` | off | Mixed-precision training on CUDA |
-
-If `--player1-type` or `--player2-type` is `nmcts` but no checkpoint exists yet (no `--initial-checkpoint` and no `--playerN-model`), round 1 falls back to `random` for that slot; later rounds use the newly trained model.
+| `--non-interactive-logging` | off | Throttle tqdm progress updates and emit plain log lines (for non-TTY shells and log files) | (no `--initial-checkpoint` and no `--playerN-model`), round 1 falls back to `random` for that slot; later rounds use the newly trained model.
 
 **Examples**
 
@@ -323,7 +324,7 @@ Both sections use the same fields. Values are passed to `run_pipeline.py` on eac
 
 Smoke defaults use a tiny UTTT workload with `mcts` players. Full GPU defaults target a larger `UTTT` run with `nmcts` players. The default device split keeps self-play on CPU and training on GPU to avoid CUDA contention during data generation.
 
-Cloud builds always enable `--augment-train` and `--deduplicate-train`. Other `run_pipeline.py` flags (learning rate, loss weights, val split, etc.) are not exposed in this config and keep their Python defaults.
+Cloud builds always enable `--augment-train`, `--deduplicate-train`, and `--non-interactive-logging` (so CloudWatch and `cloud-init` logs stay readable). Other `run_pipeline.py` flags (learning rate, loss weights, val split, etc.) are not exposed in this config and keep their Python defaults.
 
 #### Timeouts (`timeouts`)
 
