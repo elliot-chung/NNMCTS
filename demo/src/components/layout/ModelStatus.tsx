@@ -14,21 +14,18 @@ import {
 
 import { Spinner } from "@/components/ui/spinner";
 
-import type { ModelLoadState } from "@/hooks/useGame";
+import type { AiMode, ModelLoadState } from "@/hooks/useGame";
 
 import { Badge } from "@/components/ui/badge";
 
 
 
 interface ModelStatusProps {
-
   modelLoad: ModelLoadState;
-
+  aiMode: AiMode;
 }
 
-
-
-export function ModelStatus({ modelLoad }: ModelStatusProps) {
+export function ModelStatus({ modelLoad, aiMode }: ModelStatusProps) {
 
   return (
 
@@ -72,20 +69,22 @@ export function ModelStatus({ modelLoad }: ModelStatusProps) {
 
 
 
-        {modelLoad.status === "ready" && modelLoad.useNeural && (
-
+        {modelLoad.status === "ready" && modelLoad.useNeural && aiMode === "policy" && (
           <div className="flex flex-col gap-2 text-sm">
-
-            <Badge>Neural MCTS active</Badge>
-
+            <Badge>Policy network active</Badge>
             <p className="text-muted-foreground">
-
-              Policy network guides MCTS rollouts.
-
+              Moves come directly from the policy head — no MCTS search.
             </p>
-
           </div>
+        )}
 
+        {modelLoad.status === "ready" && modelLoad.useNeural && aiMode === "mcts" && (
+          <div className="flex flex-col gap-2 text-sm">
+            <Badge>Neural MCTS active</Badge>
+            <p className="text-muted-foreground">
+              Policy network guides MCTS rollouts.
+            </p>
+          </div>
         )}
 
 

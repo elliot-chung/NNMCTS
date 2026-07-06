@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { MctsTimeLimit } from "@/hooks/useGame";
+import type { AiMode, MctsTimeLimit } from "@/hooks/useGame";
 import { UTTTGame, type Move } from "@/lib/uttt";
 import type {
   SerializedGame,
@@ -141,10 +141,20 @@ export function useAiPlayer(options: UseAiPlayerOptions = {}) {
   }, []);
 
   const think = useCallback(
-    (game: UTTTGame, timeLimitSeconds: MctsTimeLimit): Promise<AiMoveResult> => {
+    (
+      game: UTTTGame,
+      timeLimitSeconds: MctsTimeLimit,
+      aiMode: AiMode,
+    ): Promise<AiMoveResult> => {
       const worker = workerRef.current;
       if (!worker || !isReady) {
         return Promise.reject(new Error("AI worker is not ready"));
+      }
+
+      if (aiMode === "policy" && !useNeural) {
+        return Promise.reject(
+          new Error("Policy-only mode requires the neural model"),
+        );
       }
 
       cancel();
@@ -162,6 +172,7 @@ export function useAiPlayer(options: UseAiPlayerOptions = {}) {
           game: serializeGame(game),
           timeLimitSeconds,
           useNeural,
+          aiMode,
         } satisfies WorkerRequest);
       });
     },

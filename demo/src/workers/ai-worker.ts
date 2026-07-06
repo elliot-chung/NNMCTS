@@ -1,7 +1,10 @@
 import { createRootNode, mcts } from "@/lib/mcts";
 import { loadModel, setModel } from "@/lib/model/inference";
 import { modelFileExists } from "@/lib/model/loader";
+import { selectPolicyMove } from "@/lib/model/policy-only";
 import { UTTTGame, type Move, type Player } from "@/lib/uttt";
+
+export type AiMode = "mcts" | "policy";
 
 export interface SerializedGame {
   state: number[];
@@ -18,6 +21,7 @@ export type WorkerRequest =
       game: SerializedGame;
       timeLimitSeconds: number;
       useNeural?: boolean;
+      aiMode?: AiMode;
     }
   | { type: "cancel"; requestId?: string };
 
@@ -117,15 +121,19 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
         const game = deserializeGame(message.game);
         const useNeural = message.useNeural ?? false;
-        const root = createRootNode<Move, UTTTGame>(game, useNeural);
+        const aiMode = message.aiMode ?? "mcts";
 
         if (cancelled || activeRequestId !== message.requestId) {
           return;
         }
 
-        const { move, policy } = await mcts(root, {
-          timeLimitSeconds: message.timeLimitSeconds,
-        });
+        const { move, policy } =
+          aiMode === "policy"
+            ? await selectPolicyMove(game)
+            : await mcts(
+                createRootNode<Move, UTTTGame>(game, useNeural),
+                { timeLimitSeconds: message.timeLimitSeconds },
+              );
 
         if (cancelled || activeRequestId !== message.requestId) {
           return;

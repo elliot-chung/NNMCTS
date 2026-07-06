@@ -3,6 +3,7 @@
 import { Board } from "@/components/game/Board";
 import { GameStatus } from "@/components/game/GameStatus";
 import { DifficultySlider } from "@/components/controls/DifficultySlider";
+import { ModeSelector } from "@/components/controls/ModeSelector";
 import { NewGameButton } from "@/components/controls/NewGameButton";
 import { SideSelector } from "@/components/controls/SideSelector";
 import { Header } from "@/components/layout/Header";
@@ -22,6 +23,7 @@ export function GameView() {
     phase,
     humanSide,
     searchTimeLimit,
+    aiMode,
     forcedBoard,
     legalMoves,
     isHumanTurn,
@@ -31,10 +33,13 @@ export function GameView() {
     newGame,
     setHumanSide,
     setSearchTimeLimit,
+    setAiMode,
   } = useGame();
 
   const boardDisabled = !isHumanTurn || phase === "ai_thinking";
   const settingsDisabled = phase === "ai_thinking";
+  const policyOnlyAvailable =
+    modelLoad.status === "ready" && modelLoad.useNeural;
 
   return (
     <div className="flex min-h-full flex-col bg-background">
@@ -63,7 +68,7 @@ export function GameView() {
           <Card size="sm">
             <CardHeader>
               <CardTitle>Game Controls</CardTitle>
-              <CardDescription>Configure side and search time</CardDescription>
+              <CardDescription>Configure side, mode, and search time</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               <SideSelector
@@ -71,19 +76,29 @@ export function GameView() {
                 onChange={setHumanSide}
                 disabled={settingsDisabled}
               />
-              <DifficultySlider
-                value={searchTimeLimit}
-                onChange={setSearchTimeLimit}
+              <ModeSelector
+                value={aiMode}
+                onChange={setAiMode}
                 disabled={settingsDisabled}
+                policyOnlyDisabled={!policyOnlyAvailable}
               />
+              {aiMode === "mcts" && (
+                <DifficultySlider
+                  value={searchTimeLimit}
+                  onChange={setSearchTimeLimit}
+                  disabled={settingsDisabled}
+                />
+              )}
               <NewGameButton
-                onNewGame={() => newGame({ humanSide, searchTimeLimit })}
+                onNewGame={() =>
+                  newGame({ humanSide, searchTimeLimit, aiMode })
+                }
                 disabled={settingsDisabled}
               />
             </CardContent>
           </Card>
 
-          <ModelStatus modelLoad={modelLoad} />
+          <ModelStatus modelLoad={modelLoad} aiMode={aiMode} />
         </aside>
       </main>
     </div>
