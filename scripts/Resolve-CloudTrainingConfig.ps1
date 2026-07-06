@@ -52,6 +52,8 @@ function Resolve-CloudTrainingConfig {
     SelfPlayWorkers = if ($SelfPlayWorkers -gt 0) { $SelfPlayWorkers } elseif ($training.PSObject.Properties.Name -contains "selfPlayWorkers") { [int]$training.selfPlayWorkers } else { 1 }
     PlayDevice = if ($PlayDevice) { $PlayDevice } elseif ($training.PSObject.Properties.Name -contains "playDevice") { [string]$training.playDevice } else { "cpu" }
     TrainDevice = if ($TrainDevice) { $TrainDevice } elseif ($training.PSObject.Properties.Name -contains "trainDevice") { [string]$training.trainDevice } else { "cuda" }
+    NumEvalGames = if ($training.PSObject.Properties.Name -contains "numEvalGames") { [int]$training.numEvalGames } else { 0 }
+    WinrateThreshold = if ($training.PSObject.Properties.Name -contains "winrateThreshold") { [double]$training.winrateThreshold } else { 0.55 }
     MaxTrainingSeconds = if ($MaxTrainingSeconds -gt 0) { $MaxTrainingSeconds } else { $defaultMaxTrainingSeconds }
     MaxInstanceSeconds = if ($MaxInstanceSeconds -gt 0) { $MaxInstanceSeconds } else { $defaultMaxInstanceSeconds }
     ConfigPath = $ConfigPath
@@ -80,6 +82,10 @@ function Add-TrainingConfigTags {
   $Tags.Add(@{ Key = "nnmcts-${tagPrefix}self-play-workers"; Value = [string]$TrainingConfig.SelfPlayWorkers }) | Out-Null
   $Tags.Add(@{ Key = "nnmcts-${tagPrefix}play-device"; Value = [string]$TrainingConfig.PlayDevice }) | Out-Null
   $Tags.Add(@{ Key = "nnmcts-${tagPrefix}train-device"; Value = [string]$TrainingConfig.TrainDevice }) | Out-Null
+  if ($TrainingConfig.ContainsKey("NumEvalGames") -and [int]$TrainingConfig.NumEvalGames -gt 0) {
+    $Tags.Add(@{ Key = "nnmcts-${tagPrefix}num-eval-games"; Value = [string]$TrainingConfig.NumEvalGames }) | Out-Null
+    $Tags.Add(@{ Key = "nnmcts-${tagPrefix}winrate-threshold"; Value = [string]$TrainingConfig.WinrateThreshold }) | Out-Null
+  }
   if ($Prefix) {
     $Tags.Add(@{ Key = "nnmcts-${tagPrefix}max-training-seconds"; Value = [string]$TrainingConfig.MaxTrainingSeconds }) | Out-Null
   }

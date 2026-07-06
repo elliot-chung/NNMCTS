@@ -195,11 +195,32 @@ Alternate self-play and supervised training for several rounds. Each round gener
 | `--seed` | 0 | Base seed (incremented per round) |
 | `--augment-train` / `--augment-val` | off | Symmetry augmentation |
 | `--deduplicate-train` / `--deduplicate-val` | off | Deduplicate positions |
-| `--accumulate-records` | off | Train each round on all games seen so far |
+| `--accumulate-records` | off | Train each round on all games seen so far (ignored when eval gating is enabled) |
+| `--num-eval-games` | `0` | Head-to-head games after training; `0` disables eval gating (legacy behavior) |
+| `--winrate-threshold` | `0.55` | Candidate must **strictly exceed** this win rate vs the champion to be promoted |
 | `--self-play-workers` | 1 | Parallel self-play workers |
 | `--show-mcts-timing` | off | MCTS timing diagnostics |
 | `--amp` | off | Mixed-precision training on CUDA |
-| `--non-interactive-logging` | off | Throttle tqdm progress updates and emit plain log lines (for non-TTY shells and log files) | (no `--initial-checkpoint` and no `--playerN-model`), round 1 falls back to `random` for that slot; later rounds use the newly trained model.
+| `--non-interactive-logging` | off | Throttle tqdm progress updates and emit plain log lines (for non-TTY shells and log files) |
+
+When no checkpoint is available for an `nmcts` player (no `--initial-checkpoint` and no `--playerN-model`), round 1 falls back to `random` for that slot; later rounds use the champion or latest trained model.
+
+#### Evaluation gating (`--num-eval-games > 0`)
+
+When eval is enabled, the pipeline tracks a **champion** checkpoint used for self-play and as the training parent. After each round:
+
+1. Self-play runs with the current champion.
+2. Self-play records since the last promotion are merged into a champion-streak dataset (`datasets/round_NNN_champion.pkl`).
+3. A **candidate** is trained from the champion and saved to `checkpoints/round_NNN.pt` (always written, even on rejection).
+4. The candidate plays the champion in `--num-eval-games` head-to-head games with seat swapping (half as player 1, half as player 2).
+5. If the candidate win rate is **strictly greater than** `--winrate-threshold`, it is promoted to champion and the streak dataset resets. Otherwise the champion is kept and the streak dataset grows with the next round's self-play.
+
+**Notes:**
+
+- Draws count as non-wins for the candidate win rate (only outright wins count).
+- The first round with no prior champion (`--initial-checkpoint` omitted) skips eval and auto-promotes the candidate.
+- `--accumulate-records` is ignored with a warning; champion-streak accumulation replaces it.
+- Eval requires at least one `nmcts` self-play player without a fixed `--playerN-model`.
 
 **Examples**
 
@@ -248,6 +269,21 @@ python run_pipeline.py \
   --initial-checkpoint output/checkpoints/round_020.pt \
   --play-device cpu \
   --train-device cuda
+
+# Neural self-play with evaluation gating (promote only if candidate beats champion)
+python run_pipeline.py \
+  --game-type TTT \
+  --rounds 3 \
+  --games-per-round 10 \
+  --num-eval-games 20 \
+  --winrate-threshold 0.55 \
+  --output-dir output/eval-test \
+  --player1-type nmcts \
+  --player2-type nmcts \
+  --player1-iters 25 \
+  --player2-iters 25 \
+  --epochs 3 \
+  --device cpu
 ```
 
 ## Project structure
@@ -321,6 +357,8 @@ Both sections use the same fields. Values are passed to `run_pipeline.py` on eac
 | `selfPlayWorkers` | Parallel self-play worker processes (GPU runs only). |
 | `playDevice` | Device for self-play and NMCTS inference on the instance (`cpu` or `cuda`). Cloud defaults use `cpu`. |
 | `trainDevice` | Device for supervised training on the instance (`cpu` or `cuda`). Cloud defaults use `cuda`. |
+| `numEvalGames` | Optional. Head-to-head eval games after each training round (`0` = disabled, legacy behavior). Passed as `--num-eval-games`. |
+| `winrateThreshold` | Optional. Win-rate threshold for promotion when eval is enabled (default `0.55`). Passed as `--winrate-threshold`. |
 
 Smoke defaults use a tiny UTTT workload with `mcts` players. Full GPU defaults target a larger `UTTT` run with `nmcts` players. The default device split keeps self-play on CPU and training on GPU to avoid CUDA contention during data generation.
 

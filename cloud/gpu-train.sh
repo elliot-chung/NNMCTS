@@ -16,6 +16,8 @@ readonly DEFAULT_PLAYER2_TYPE=nmcts
 readonly DEFAULT_SELF_PLAY_WORKERS=3
 readonly DEFAULT_PLAY_DEVICE=cpu
 readonly DEFAULT_TRAIN_DEVICE=cuda
+readonly DEFAULT_NUM_EVAL_GAMES=0
+readonly DEFAULT_WINRATE_THRESHOLD=0.55
 
 START_TIME=$(date +%s)
 BUCKET=""
@@ -208,6 +210,8 @@ run_training_phase() {
   local train_device="${13}"
   local initial_checkpoint="${14:-}"
   local start_round="${15:-1}"
+  local num_eval_games="${16:-0}"
+  local winrate_threshold="${17:-0.55}"
 
   local limit
   limit=$(training_limit "${requested_seconds}")
@@ -245,6 +249,10 @@ run_training_phase() {
   if [[ -n "${initial_checkpoint}" ]]; then
     pipeline_args+=(--initial-checkpoint "${initial_checkpoint}")
     pipeline_args+=(--start-round "${start_round}")
+  fi
+  if [[ "${num_eval_games}" -gt 0 ]]; then
+    pipeline_args+=(--num-eval-games "${num_eval_games}")
+    pipeline_args+=(--winrate-threshold "${winrate_threshold}")
   fi
 
   timeout "${limit}" "$(python_cmd)" run_pipeline.py "${pipeline_args[@]}"
@@ -319,6 +327,8 @@ PLAYER2_TYPE=$(get_tag "nnmcts-player2-type" "${DEFAULT_PLAYER2_TYPE}")
 SELF_PLAY_WORKERS=$(get_tag "nnmcts-self-play-workers" "${DEFAULT_SELF_PLAY_WORKERS}")
 PLAY_DEVICE=$(get_tag "nnmcts-play-device" "${DEFAULT_PLAY_DEVICE}")
 TRAIN_DEVICE=$(get_tag "nnmcts-train-device" "${DEFAULT_TRAIN_DEVICE}")
+NUM_EVAL_GAMES=$(get_tag "nnmcts-num-eval-games" "${DEFAULT_NUM_EVAL_GAMES}")
+WINRATE_THRESHOLD=$(get_tag "nnmcts-winrate-threshold" "${DEFAULT_WINRATE_THRESHOLD}")
 INITIAL_CHECKPOINT_NAME=$(get_tag "nnmcts-initial-checkpoint-name" "")
 START_ROUND_TAG=$(get_tag "nnmcts-start-round" "")
 INITIAL_CHECKPOINT=""
@@ -386,7 +396,11 @@ if [[ "${RUN_SMOKE}" == "true" ]]; then
     "${SMOKE_PLAYER2_TYPE}" \
     "${SMOKE_SELF_PLAY_WORKERS}" \
     "${SMOKE_PLAY_DEVICE}" \
-    "${SMOKE_TRAIN_DEVICE}"; then
+    "${SMOKE_TRAIN_DEVICE}" \
+    "" \
+    "1" \
+    "0" \
+    "${DEFAULT_WINRATE_THRESHOLD}"; then
     upload_artifacts "failed"
     exit 1
   fi
@@ -414,7 +428,9 @@ if ! run_training_phase \
   "${PLAY_DEVICE}" \
   "${TRAIN_DEVICE}" \
   "${INITIAL_CHECKPOINT}" \
-  "${START_ROUND}"; then
+  "${START_ROUND}" \
+  "${NUM_EVAL_GAMES}" \
+  "${WINRATE_THRESHOLD}"; then
   train_exit=$?
   if [[ $train_exit -eq 124 ]]; then
     upload_artifacts "timed_out"
